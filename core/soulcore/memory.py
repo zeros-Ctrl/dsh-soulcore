@@ -12,11 +12,15 @@ memory.py —— 分层记忆库（借鉴 LSTM 门控思想，但不训练网络
 路径即目录树：chat/qq/group/<群号>、chat/bilibili/dm/<uid>、project/<项目名>、core/people/...、core/self
 """
 from __future__ import annotations
-import math, os, sqlite3, threading, time, json
+import math, os, re, sqlite3, threading, time, json
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
 from .textutil import index_text, fts_query, jaccard, token_weights, overlap
+from .embedding import cosines, pack
+from .extractor import is_question
+
+INDEX_VERSION = 2   # v2：索引里加入概念 token（见 concepts.py）
 
 DEFAULT_TAU_HOURS = {
     "turn": 72,            # 原始对话：3 天
@@ -55,6 +59,7 @@ CREATE TABLE IF NOT EXISTS relations(
   interactions INTEGER DEFAULT 0, last_seen REAL, PRIMARY KEY(platform, uid)
 );
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS vecs(id INTEGER PRIMARY KEY, model TEXT, v BLOB);
 """
 
 
@@ -80,8 +85,11 @@ class Item:
 
 
 class MemoryStore:
-    def __init__(self, data_dir: str, cfg: dict | None = None, clock=time.time):
+    def __init__(self, data_dir: str, cfg: dict | None = None, clock=time.time, embedder=None):
         cfg = cfg or {}
+        self.embedder = embedder            # 可选：CachedEmbedder（见 embedding.py）
+        self.embed_turns = cfg.get("embed_turns", False)
+        self.sem_floor = cfg.get("sem_floor", 0.45)   # 余弦相似度低于它视为不相关
         self.dir = data_dir
         self.md_root = os.path.join(data_dir, "memory")
         os.makedirs(self.md_root, exist_ok=True)
@@ -96,6 +104,8 @@ class MemoryStore:
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
         self.db.commit()
+        if self.meta_get("index_version", 1) < INDEX_VERSION:
+            self.reindex()
 
     # ================= 输入门：写入 =================
     def write(self, path: str, kind: str, content: str, importance: float, *, role: str = "",
@@ -127,9 +137,38 @@ class MemoryStore:
             self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)",
                             (iid, index_text(content + " " + tag_s + " " + speaker)))
             self.db.commit()
+        if self.embedder is not None and (kind != "turn" or self.embed_turns):
+            self._embed_ids([(iid, content + " " + tag_s)])
         if mirror:
             self._mirror(path, kind, content, iid, importance, speaker, role, now)
         return iid
+
+    def _embed_ids(self, pairs: list[tuple[int, str]]) -> int:
+        if not pairs or self.embedder is None:
+            return 0
+        vecs = self.embedder.embed([t for _, t in pairs])
+        if not vecs:
+            return 0
+        with self.lock:
+            self.db.executemany("INSERT OR REPLACE INTO vecs(id, model, v) VALUES(?,?,?)",
+                                [(i, self.embedder.name, pack(v)) for (i, _), v in zip(pairs, vecs)])
+            self.db.commit()
+        return len(vecs)
+
+    def backfill_embeddings(self, batch: int = 32, limit: int = 256) -> int:
+        """给还没有向量的提炼条目补向量（换模型后也会重算）"""
+        if self.embedder is None:
+            return 0
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT items.id, items.content, items.tags FROM items LEFT JOIN vecs ON vecs.id=items.id "
+                "WHERE (vecs.id IS NULL OR vecs.model!=?) AND items.status!='merged' AND items.status!='deleted' "
+                + ("" if self.embed_turns else "AND items.kind!='turn' ") + "LIMIT ?",
+                (self.embedder.name, limit)).fetchall()
+        n = 0
+        for i in range(0, len(rows), batch):
+            n += self._embed_ids([(r["id"], r["content"] + " " + (r["tags"] or "")) for r in rows[i:i + batch]])
+        return n
 
     def _find_duplicate(self, path: str, kind: str, content: str, thr: float = 0.75) -> Optional[int]:
         q = fts_query(content)
@@ -165,11 +204,20 @@ class MemoryStore:
         q = fts_query(query)
         if not q:
             return []
+        if include_cold:
+            min_score *= 0.25     # 翻冷存储是主动回溯，门槛放低
         qtok = token_weights(query)
-        scopes: list[tuple[str, float]] = [(p, 1.0) for p in extra_paths]
+        qv = None
+        if self.embedder is not None:
+            got = self.embedder.embed([query])
+            qv = got[0] if got else None
+        # 顺序：当前分支 → 指定的额外分支（对方档案、她自己）→ 逐级父分支 → core → 全局
+        # 当前分支和额外分支一定都会搜完，之后才允许"凑够 k 条就停"
         parts = path.split("/")
-        disc = 1.0
-        for i in range(len(parts), 0, -1):
+        scopes: list[tuple[str, float]] = [(path, 1.0)] + [(p, 0.9) for p in extra_paths if p != path]
+        must = len(scopes)
+        disc = 0.7
+        for i in range(len(parts) - 1, 0, -1):
             scopes.append(("/".join(parts[:i]), disc))
             disc *= 0.7
         scopes.append(("core", 0.8))
@@ -189,23 +237,41 @@ class MemoryStore:
         priv_sql = (" AND (items.path IN (%s) OR (items.kind!='turn' AND NOT (%s)))"
                     % (",".join("?" * len(allowed)), hidden_sql))
         with self.lock:
-            for scope, d in scopes:
+            for si, (scope, d) in enumerate(scopes):
                 if scope in allowed:
                     where = f"(items.path=? OR items.path LIKE ?) AND {status_sql}{kind_sql}"
-                    args = (q, scope, scope + "/%")
+                    wargs: tuple = (scope, scope + "/%")
                 elif scope:
                     where = f"(items.path=? OR items.path LIKE ?) AND {status_sql}{kind_sql}{priv_sql}"
-                    args = (q, scope, scope + "/%", *allowed)
+                    wargs = (scope, scope + "/%", *allowed)
                 else:
                     where = f"{status_sql}{kind_sql}{priv_sql}"
-                    args = (q, *allowed)
-                rows = self.db.execute(
-                    "SELECT items.*, bm25(items_fts) AS b FROM items_fts JOIN items ON items.id=items_fts.rowid "
-                    f"WHERE items_fts MATCH ? AND {where} ORDER BY b LIMIT 40", args).fetchall()
-                for r in rows:
-                    if r["id"] in found:
-                        continue
-                    rel = overlap(qtok, r["content"] + " " + (r["tags"] or ""))
+                    wargs = tuple(allowed)
+                cand: dict[int, list] = {}   # id -> [row, 字词相关度, 语义相关度]
+                for r in self.db.execute(
+                        "SELECT items.* FROM items_fts JOIN items ON items.id=items_fts.rowid "
+                        f"WHERE items_fts MATCH ? AND {where} ORDER BY bm25(items_fts) LIMIT 40", (q, *wargs)):
+                    if r["id"] not in found:
+                        cand[r["id"]] = [r, overlap(qtok, r["content"] + " " + (r["tags"] or "")), 0.0]
+                if qv is not None:
+                    rows = self.db.execute(
+                        f"SELECT items.*, vecs.v AS _v FROM items JOIN vecs ON vecs.id=items.id WHERE {where}",
+                        wargs).fetchall()
+                    sims = cosines(qv, [r["_v"] for r in rows])
+                    top = sorted(((sm, r) for sm, r in zip(sims, rows) if sm >= self.sem_floor),
+                                 key=lambda x: -x[0])[:20]
+                    for sm, r in top:
+                        if r["id"] in found:
+                            continue
+                        sem = min(1.0, (sm - self.sem_floor) / (0.85 - self.sem_floor))
+                        if r["id"] in cand:
+                            cand[r["id"]][2] = sem
+                        else:
+                            cand[r["id"]] = [r, overlap(qtok, r["content"] + " " + (r["tags"] or "")), sem]
+                for iid, (r, lex, sem) in cand.items():
+                    rel = 1 - (1 - lex) * (1 - sem)      # 字词 / 语义 任一命中即可，两者都命中更高
+                    if r["kind"] == "turn" and is_question(r["content"]):
+                        rel *= 0.3                       # 以前问过的问题 ≠ 答案
                     w = self.weight(r, now)
                     if include_cold:
                         w = max(w, self.cold_threshold)
@@ -213,16 +279,35 @@ class MemoryStore:
                     if score < min_score:
                         continue
                     it = _item(r); it.score = score; it.weight_now = w
-                    found[r["id"]] = it
-                if len(found) >= k:
+                    found[iid] = it
+                if len(found) >= k and si >= must - 1:
                     break
-            res = sorted(found.values(), key=lambda x: -x.score)[:k]
+            ranked = sorted(found.values(), key=lambda x: -x.score)
+            # 去重：原话(turn)和从它提炼出的条目几乎一样时只留提炼条目
+            res: list[Item] = []
+            for it in sorted(ranked, key=lambda x: (x.kind == "turn", -x.score)):
+                if any(jaccard(it.content, o.content) > 0.6 for o in res):
+                    continue
+                res.append(it)
+            res = sorted(res, key=lambda x: -x.score)[:k]
             if touch and res:
                 self.db.executemany(
                     "UPDATE items SET last_access=?, access_count=access_count+1, status='hot' WHERE id=?",
                     [(now, it.id) for it in res])
                 self.db.commit()
         return res
+
+    def reindex(self) -> int:
+        """重建全文索引（升级分词/概念词典后调用）"""
+        with self.lock:
+            rows = self.db.execute("SELECT id, content, tags, speaker FROM items").fetchall()
+            self.db.execute("DELETE FROM items_fts")
+            self.db.executemany("INSERT INTO items_fts(rowid, tok) VALUES(?,?)",
+                                [(r["id"], index_text(r["content"] + " " + (r["tags"] or "") + " " + (r["speaker"] or "")))
+                                 for r in rows])
+            self.db.commit()
+            self.meta_set("index_version", INDEX_VERSION)
+        return len(rows)
 
     def recent_turns(self, path: str, n: int = 12) -> list[Item]:
         with self.lock:
@@ -322,6 +407,85 @@ class MemoryStore:
         for r in rows:
             out.setdefault(r["top"], {})[r["status"]] = r["c"]
         return out
+
+    # ================= Markdown 回写 =================
+    MD_FILES = {"decisions.md": ("decision",), "todo.md": ("todo",), "summaries.md": ("summary",),
+                "notes.md": ("fact", "preference", "person", "self")}
+    _MD_LINE = re.compile(r"^(\s*[-*]\s+)(?:\[(\w+)\]\s*)?(.*?)\s*(<!--\s*id=(\d+)[^>]*-->)?\s*$")
+
+    def sync_markdown(self, force: bool = False) -> dict:
+        """把人在 Markdown 镜像里做的修改同步回数据库：
+             改了某一行的文字 → 更新那条记忆（重建索引/向量）
+             删掉某一行       → 那条记忆标记为 deleted（不再被检索；数据库里仍保留可恢复）
+             新加一行 "- xxx" → 作为一条新记忆写入（重要性 0.85），并在行尾补上 id 注释
+           只处理 notes/decisions/todo/summaries.md；按月的对话日志是只追加的流水，不回写。"""
+        stats = {"files": 0, "updated": 0, "deleted": 0, "added": 0}
+        now = self.clock()
+        for d, _, files in os.walk(self.md_root):
+            for fn in files:
+                if fn not in self.MD_FILES:
+                    continue
+                full = os.path.join(d, fn)
+                rel = os.path.relpath(d, self.md_root).replace(os.sep, "/")
+                mt = os.path.getmtime(full)
+                key = "md_mtime:" + rel + "/" + fn
+                if not force and self.meta_get(key) == mt:
+                    continue
+                stats["files"] += 1
+                self._sync_file(full, rel, self.MD_FILES[fn], now, stats)
+                self.meta_set(key, os.path.getmtime(full))
+        return stats
+
+    def _sync_file(self, full: str, path: str, kinds: tuple, now: float, stats: dict) -> None:
+        with open(full, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+        seen: set[int] = set()
+        changed_file = False
+        with self.lock:
+            for li, line in enumerate(lines):
+                m = self._MD_LINE.match(line)
+                if not m or not m.group(3).strip():
+                    continue
+                prefix, kind, content, _, iid = m.groups()
+                content = content.strip()
+                kind = kind if kind in DEFAULT_TAU_HOURS and kind != "turn" else kinds[0]
+                if iid:
+                    iid = int(iid); seen.add(iid)
+                    r = self.db.execute("SELECT * FROM items WHERE id=? AND path=?", (iid, path)).fetchone()
+                    if r is None:
+                        continue
+                    if r["content"] != content or r["kind"] != kind or r["status"] == "deleted":
+                        self.db.execute("UPDATE items SET content=?, kind=?, status='hot', last_access=? WHERE id=?",
+                                        (content, kind, now, iid))
+                        self.db.execute("DELETE FROM items_fts WHERE rowid=?", (iid,))
+                        self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)",
+                                        (iid, index_text(content + " " + (r["tags"] or ""))))
+                        self.db.execute("DELETE FROM vecs WHERE id=?", (iid,))
+                        stats["updated"] += 1
+                else:
+                    cur = self.db.execute(
+                        "INSERT INTO items(path,kind,role,speaker,content,importance,tau_h,created,last_access,tags)"
+                        " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        (path, kind, "", "", content, 0.85, float(self.tau.get(kind, 72)), now, now, "manual"))
+                    new_id = cur.lastrowid; seen.add(new_id)
+                    self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)", (new_id, index_text(content + " manual")))
+                    lines[li] = f"{prefix}[{kind}] {content}  <!-- id={new_id} imp=0.85 {time.strftime('%Y-%m-%d', time.localtime(now))} manual -->"
+                    changed_file = True
+                    stats["added"] += 1
+            q = "SELECT id FROM items WHERE path=? AND kind IN (%s) AND status NOT IN ('merged','deleted') AND created < ?" \
+                % ",".join("?" * len(kinds))
+            gone = [r["id"] for r in self.db.execute(q, (path, *kinds, now - 5)) if r["id"] not in seen]
+            if gone:
+                self.db.executemany("UPDATE items SET status='deleted' WHERE id=?", [(i,) for i in gone])
+                stats["deleted"] += len(gone)
+            self.db.commit()
+        if changed_file:
+            tmp = full + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            os.replace(tmp, full)
+        if self.embedder is not None:
+            self.backfill_embeddings()
 
     # ================= Markdown 镜像 =================
     def _mirror(self, path, kind, content, iid, imp, speaker, role, ts) -> None:

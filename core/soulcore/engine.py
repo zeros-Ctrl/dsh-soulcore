@@ -32,7 +32,9 @@ class Engine:
         self.data_dir = dd if os.path.isabs(dd) else os.path.join(base_dir, dd)
         os.makedirs(self.data_dir, exist_ok=True)
         self.mcfg = cfg.get("memory", {})
-        self.store = MemoryStore(self.data_dir, self.mcfg, clock=clock)
+        from .embedding import make_embedder
+        self.embedder = make_embedder(self.mcfg.get("embedding"), clock)
+        self.store = MemoryStore(self.data_dir, self.mcfg, clock=clock, embedder=self.embedder)
         self.llm = llm or make_llm(cfg.get("llm", {}), mock=mock)
         pcfg = cfg.get("persona", {})
         self.name = pcfg.get("name", "小汐")
@@ -77,9 +79,11 @@ class Engine:
             rel = self.store.relation(ev.platform, ev.user_id)
             info = {"event": None, "amp": 0.0, "directed": directed}
             if directed:
-                name = appraise(ev.text, ev.is_stranger, self.llm, self.cfg.get("appraisal", {}).get("mode", "heuristic"))
+                ap = appraise(ev.text, ev.is_stranger, self.llm, self.cfg.get("appraisal", {}).get("mode", "heuristic"),
+                              name=self.name)
+                name = ap.event
                 spec = EVENTS[name]
-                amp = self.emo.sample_amp(name)
+                amp = self.emo.sample_amp(name) * ap.intensity
                 if spec.social:  # 越在乎的人，影响越大
                     amp *= 0.6 + 0.8 * rel["affinity"]
                 if ev.is_stranger:
@@ -104,7 +108,9 @@ class Engine:
             self._advance()
             recent = self.store.recent_turns(ev.path, m.get("recent_turns", 12))
             recent_ids = {t.id for t in recent}
-            query = ev.text + " " + " ".join(t.content for t in recent[-3:-1])
+            # 只有半小时内的上文才算"正在聊的话题"，几天前的旧话混进查询只会带偏
+            fresh = [t for t in recent[-3:-1] if self.clock() - t.created < 1800]
+            query = ev.text + " " + " ".join(t.content for t in fresh)
             extra = [ev.person_path, "core/self"]
             share = ev.platform == "local" or m.get("share_projects_in_chat", False)
             for proj in (self.store.list_projects() if share else []):
@@ -183,7 +189,7 @@ class Engine:
                 path = ev.person_path
             else:
                 path = ev.path
-            tags = mm["tags"] + ([f"user:{ev.user_id}"] if about == "user" else [])
+            tags = mm["tags"] + mm.get("keywords", []) + ([f"user:{ev.user_id}"] if about == "user" else [])
             with self.lock:
                 if self.store.write(path, mm["kind"], mm["content"], mm["importance"], tags=tags,
                                     user_id=ev.user_id if about == "user" else ""):
@@ -223,9 +229,11 @@ class Engine:
         self.observe(ev)
         ctx = self.prepare(ev)
         with self.lock:
-            person = self.store.by_path(ev.person_path, limit=4)
-            rel = self.store.relation(ev.platform, ev.user_id)
             mems = [m for m in ctx["_mem_items"]]
+            shown = {m.id for m in mems}
+            # 人物档案只常驻最重要的 2 条（比如名字）；其余的靠和当前话题相关才被召回
+            person = [p for p in self.store.by_path(ev.person_path, limit=2) if p.id not in shown]
+            rel = self.store.relation(ev.platform, ev.user_id)
         text = build_context_block(self.name, ctx["mood_text"], rel, mems, person, self.clock(),
                                    self.mcfg.get("inject_max_chars", 1600))
         return {"text": text, "mood": ctx["mood"], "label": ctx["label"], "memories": ctx["memories"]}
@@ -302,6 +310,14 @@ class Engine:
                     self.store.commit_summary(path, s, [t.id for t in turns])
                 merged += 1
         res["summaries"] = merged
+        try:
+            res["embedded"] = self.store.backfill_embeddings()
+        except Exception as ex:
+            log.info("补向量失败: %s", ex)
+        try:
+            res["md_sync"] = self.store.sync_markdown()
+        except Exception as ex:
+            log.warning("Markdown 回写失败: %s", ex)
         last = self.store.meta_get("balance_checked", 0)
         every = self.cfg.get("balance", {}).get("check_every_min", 60) * 60
         if every > 0 and self.clock() - last >= every:

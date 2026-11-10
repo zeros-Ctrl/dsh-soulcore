@@ -30,6 +30,8 @@ def load_card(cfg: dict, base_dir: str) -> str:
 def affinity_desc(a: float, n: int) -> str:
     if n == 0:
         return "你第一次和这个人说话。"
+    if n <= 2:
+        return "你和这个人刚认识不久。"
     if a > 0.8: return "你很喜欢这个人，和他/她说话很放松。"
     if a > 0.62: return "你对这个人印象不错。"
     if a > 0.42: return "你和这个人还算熟悉，没什么特别的感觉。"
@@ -66,8 +68,7 @@ def build_context_block(name: str, mood_text: str, rel: dict, memories, person_n
                         max_chars: int = 1600) -> str:
     """DSH 钩子模式：每轮注入的一小段运行时上下文（人格卡走 system prompt，不在这里重复）"""
     lines = [f"[{name}·内心状态] {mood_text} 让它自然体现在语气里，不要报数值，不要每句都提心情。"]
-    if rel.get("interactions", 0) > 0:
-        lines.append(affinity_desc(rel.get("affinity", 0.5), rel.get("interactions", 0)))
+    lines.append(affinity_desc(rel.get("affinity", 0.5), rel.get("interactions", 0)))
     if person_notes:
         lines.append("关于对方：" + "；".join(it.content for it in person_notes[:4]))
     if memories:

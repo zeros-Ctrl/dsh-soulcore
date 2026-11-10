@@ -1,6 +1,6 @@
 {
   "name": "dsh-soulcore",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "给 DeepSeek Harness 的 agent 一个独立人格：PID 平滑的概率情绪 + LSTM 门控式分层长期记忆（按项目/会话归档，压缩前自动提炼落盘），可选接入 QQ(OneBot v11) 与 B站。",
   "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "persona", "memory", "emotion", "long-term-memory"],
   "author": "zeros-Crtl <2735527994@qq.com>",

@@ -84,6 +84,8 @@ def make_handler(engine, onebot=None, token: str = ""):
                         return self._send(400, {"error": f"unknown event, choose from {list(EVENTS)}"})
                     amp = engine.system_event(b["name"])
                     return self._send(200, {"amp": amp, **engine.state()})
+                if u.path == "/v1/memory/sync":
+                    return self._send(200, engine.store.sync_markdown(force=bool(b.get("force"))))
                 ev = Event.from_dict(b.get("event", {}))
                 if u.path == "/v1/chat":
                     reply = engine.handle(ev, reply=b.get("reply", True))

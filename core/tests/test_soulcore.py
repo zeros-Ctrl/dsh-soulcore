@@ -60,13 +60,13 @@ class TestMemory(Base):
         w0 = s.weight(it)
         self.clock.skip(24 * 365)                                                   # 遗忘门：一年后衰减到 1/e
         self.assertAlmostEqual(s.weight(it) / w0, math.exp(-1), places=3)
-        t = s.write("chat/qq/group/1", "turn", "今天吃什么", 0.2)
+        t = s.write("chat/qq/group/1", "turn", "今天中午吃了火锅", 0.2)
         self.clock.skip(24 * 30)
         s.maintain()
         st = s.db.execute("SELECT status FROM items WHERE id=?", (t,)).fetchone()[0]
         self.assertEqual(st, "cold")                                                # 冷却而不是删除
-        self.assertEqual(s.search("吃什么", "chat/qq/group/1"), [])
-        self.assertEqual(len(s.search("吃什么", "chat/qq/group/1", include_cold=True)), 1)
+        self.assertEqual(s.search("火锅", "chat/qq/group/1"), [])
+        self.assertEqual(len(s.search("火锅", "chat/qq/group/1", include_cold=True)), 1)
 
     def test_retrieval_refresh(self):
         s = MemoryStore(self.tmp, clock=self.clock)
@@ -263,6 +263,55 @@ class TestBili(Base):
             ad.poll_once()
         ad.resume(); self.assertIsNone(ad.paused)
         eng.close()
+
+
+class TestV02(Base):
+    def test_markdown_writeback(self):
+        s = MemoryStore(self.tmp, clock=self.clock)
+        a = s.write("project/p", "decision", "数据库用 MySQL", 0.8)
+        b = s.write("project/p", "decision", "前端用 React", 0.8)
+        self.clock.t += 60
+        f = os.path.join(self.tmp, "memory", "project", "p", "decisions.md")
+        txt = open(f, encoding="utf-8").read()
+        txt = txt.replace("数据库用 MySQL", "数据库改用 SQLite（人工修正）")
+        txt = "\n".join(l for l in txt.split("\n") if "React" not in l) + "\n- 部署用 Docker\n"
+        open(f, "w", encoding="utf-8").write(txt)
+        st = s.sync_markdown(force=True)
+        self.assertEqual((st["updated"], st["deleted"], st["added"]), (1, 1, 1))
+        self.assertEqual(s.search("数据库", "project/p")[0].content, "数据库改用 SQLite（人工修正）")
+        self.assertEqual(s.search("React 前端", "project/p"), [])          # 删掉的不再被检索
+        self.assertTrue(s.search("Docker 部署", "project/p"))
+        self.assertIn("id=", [l for l in open(f, encoding="utf-8").read().split("\n") if "Docker" in l][0])
+        self.assertEqual(s.sync_markdown(), {"files": 0, "updated": 0, "deleted": 0, "added": 0})   # 没改就不动
+
+    def test_concept_and_scope(self):
+        s = MemoryStore(self.tmp, clock=self.clock)
+        s.write("project/p", "decision", "检索层用 SQLite+FTS5，不上向量数据库", 0.8)
+        for i in range(10):
+            s.write("core/people/local/owner", "fact", f"主人的第{i}个爱好是看电影", 0.9)
+        r = s.search("为什么没用 embedding", "project/p", k=3, extra_paths=["core/people/local/owner"])
+        self.assertEqual(r[0].path, "project/p")   # 当前分支不会被额外分支挤掉
+
+    def test_appraisal_v02(self):
+        from soulcore.appraisal import appraise_detail as A
+        self.assertEqual(A("你一点也不笨").event, "praise")
+        self.assertEqual(A("老王真笨").event, "chat")
+        self.assertEqual(A("你可真厉害呢🙄").event, "scold")
+        self.assertEqual(A("滚动条怎么隐藏").event, "chat")
+        self.assertEqual(A("对不起刚才骂你了").event, "apology")
+        self.assertGreater(A("你太棒了").intensity, A("你还行吧，有点棒").intensity)
+
+    def test_embedding_hybrid(self):
+        from soulcore.embedding import CachedEmbedder
+        class Fake:
+            name = "fake"
+            def embed(self, texts):   # 把"毛孩子"和"猫"放到同一个方向
+                return [[1.0, 0.0] if ("猫" in t or "毛孩子" in t) else [0.0, 1.0] for t in texts]
+        s = MemoryStore(self.tmp, clock=self.clock, embedder=CachedEmbedder(Fake(), self.clock))
+        s.write("core/people/local/owner", "fact", "主人养了一只橘猫", 0.8)
+        s.write("core/people/local/owner", "fact", "主人在读大四", 0.8)
+        r = s.search("家里的毛孩子", "core/people/local/owner")
+        self.assertEqual(r[0].content, "主人养了一只橘猫")
 
 
 if __name__ == "__main__":

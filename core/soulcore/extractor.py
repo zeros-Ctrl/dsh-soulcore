@@ -10,7 +10,8 @@ EXTRACT_SYS = """TASK:EXTRACT 你是记忆整理器，负责从对话中提炼�
                "importance": 0.0-1.0,
                "about": "user|self|channel|project",
                "project": "项目名（仅当 about=project）",
-               "tags": ["可选标签"]}]}
+               "tags": ["可选标签"],
+               "keywords": ["3~6 个日后可能用来问起这件事的其他说法：同义词、英文/缩写、口语、上位概念"]}]}
 规则：
 - 寒暄、复读、无信息量的闲聊一律不要。宁缺毋滥，通常 0-5 条。
 - decision 要写清"决定了什么 + 为什么 + 否掉了什么"，importance ≥ 0.7。
@@ -32,6 +33,14 @@ _RULES = [
 ]
 
 
+PERSONAL = re.compile(r"我的|我(很|超|特别|最|不|平时|一直)?(喜欢|讨厌|不爱|爱吃|习惯|受不了)|我(叫|是|在读|在.{0,4}(上学|工作)|养|住|属)|生日|我晚上|我早上")
+QUESTION = re.compile(r"[?？]\s*$|吗\s*$|呢\s*$|^(为什么|为啥|怎么|什么|哪|几|谁|是不是|有没有)|(什么|哪|几点|几个|多少|怎么|为啥|为什么|吗)[^，。！,.!]{0,6}$")
+
+
+def is_question(text: str) -> bool:
+    return bool(QUESTION.search((text or "").strip()))
+
+
 def heuristic_extract(transcript: str) -> list[dict]:
     """无 LLM 时的兜底：逐行匹配关键词"""
     out, seen = [], set()
@@ -46,6 +55,9 @@ def heuristic_extract(transcript: str) -> list[dict]:
             continue  # 问句不是陈述，不当作事实
         for pat, kind, imp, about in _RULES:
             if pat.search(text):
+                # "记住…"不一定是关于对方本人的：只有出现"我的/我喜欢/我生日/我在读…"这类个人信息才归到人物档案
+                if about == "user" and not PERSONAL.search(text):
+                    about = "channel"
                 c = f"{speaker}说：{text}"
                 if c not in seen:
                     seen.add(c)
@@ -55,7 +67,9 @@ def heuristic_extract(transcript: str) -> list[dict]:
 
 
 def turn_importance(text: str, mentions_self: bool = False, scene: str = "") -> float:
-    """原始对话条目的重要性（输入门的"规则"部分）"""
+    """原始对话条目的重要性（输入门的"规则"部分）。问句本身几乎不含信息（答案才有），给很低的分"""
+    if is_question(text):
+        return 0.08
     imp = 0.2
     for pat, _, w, _ in _RULES:
         if pat.search(text or ""):
@@ -100,7 +114,8 @@ def extract(llm, turns, path: str) -> list[dict]:
             imp = 0.5
         clean.append({"kind": kind, "content": str(m["content"])[:500], "importance": max(0.0, min(1.0, imp)),
                       "about": m.get("about", "channel"), "project": str(m.get("project") or "").strip(),
-                      "tags": [str(t) for t in (m.get("tags") or [])][:6]})
+                      "tags": [str(t) for t in (m.get("tags") or [])][:6],
+                      "keywords": [str(t)[:20] for t in (m.get("keywords") or [])][:8]})
     return clean
 
 

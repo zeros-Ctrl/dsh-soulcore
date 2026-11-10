@@ -21,14 +21,16 @@ def tokens(text: str) -> list[str]:
 
 
 def index_text(text: str) -> str:
-    return " ".join(tokens(text))
+    from .concepts import concepts
+    return " ".join(tokens(text) + concepts(text))
 
 
 def fts_query(text: str, limit: int = 24) -> str:
     """把自然语言变成 FTS5 OR 查询；优先二元组（更有区分度）"""
+    from .concepts import concepts
     toks = list(dict.fromkeys(tokens(text)))
     toks.sort(key=lambda t: -len(t))
-    toks = toks[:limit]
+    toks = concepts(text) + toks[:limit]
     return " OR ".join('"' + t.replace('"', "") + '"' for t in toks)
 
 
@@ -39,11 +41,18 @@ def jaccard(a: str, b: str) -> float:
     return len(sa & sb) / len(sa | sb)
 
 
-def token_weights(text: str) -> dict[str, float]:
-    """二元组/英文词权重 2，单字权重 1"""
+CONCEPT_WEIGHT = 2.5
+
+
+def token_weights(text: str, with_concepts: bool = True) -> dict[str, float]:
+    """二元组/英文词权重 2，单字权重 1，概念 token 权重 2.5"""
     out: dict[str, float] = {}
     for t in tokens(text):
         out[t] = 2.0 if len(t) > 1 else 1.0
+    if with_concepts:
+        from .concepts import concepts
+        for c in concepts(text):
+            out[c] = CONCEPT_WEIGHT
     return out
 
 

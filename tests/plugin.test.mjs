@@ -22,6 +22,7 @@ function fakeCtx() {
     on(name, fn, opts) { (listeners[name] ??= []).push({ fn, opts }); return () => {} },
     effect(fn) { const d = fn(); if (typeof d === 'function') effects.push(d); return d },
     get(name) { return ctx[name] },
+    inject(names, cb) { if (names.every((n) => ctx[n])) cb(ctx); return () => {} },
     systemPrompt: {
       getSectionOrder: (n) => ({ DEPLOYMENT_PERSONA_SUFFIX: 10200 })[n],
       section(s) { sections.push(s); return () => {} },
@@ -170,5 +171,6 @@ test('后端挂了不影响 DSH：pre-step 原样放行', async () => {
 test('glue：压缩消息过滤、会话目录名', () => {
   assert.equal(glue.channelOf(agent('a', 'C:\\Users\\me\\proj-x\\')), 'proj-x')
   assert.equal(glue.channelOf({ session: { id: 'abc' } }), 'session-abc')
+  assert.equal(glue.channelOf({ session: { id: 'session-xyz' } }), 'session-xyz')
   assert.ok(glue.isExcluded({ dsh: { excludeSessions: ['bili-whale'] } }, agent('bili-whale-2')))
 })
