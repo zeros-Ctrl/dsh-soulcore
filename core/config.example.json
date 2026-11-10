@@ -1,0 +1,64 @@
+{
+  "persona": { "name": "小汐", "card_file": "persona.md" },
+  "data_dir": "./data",
+
+  "llm": {
+    "base_url": "https://api.deepseek.com",
+    "api_key": "",
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "model": "deepseek-chat",
+    "extract_model": "deepseek-chat",
+    "temperature": 1.0,
+    "max_tokens": 400
+  },
+
+  "emotion": {
+    "baseline": 0.62,
+    "sensitivity": 1.0,
+    "w_lonely": 1.1,
+    "max_rate": 0.008
+  },
+
+  "appraisal": { "mode": "heuristic" },
+
+  "memory": {
+    "extract_every": 6,
+    "recent_turns": 12,
+    "top_k": 8,
+    "cold_threshold": 0.04,
+    "consolidate_min": 30,
+    "share_projects_in_chat": false,
+    "tau_hours": { "turn": 72, "fact": 1440, "decision": 8760 }
+  },
+
+  "balance": { "check_every_min": 60, "low_threshold": 5.0 },
+
+  "server": { "host": "127.0.0.1", "port": 8765, "token": "", "tick_every_min": 15 },
+
+  "qq": {
+    "enabled": false,
+    "api_base": "http://127.0.0.1:3000",
+    "access_token": "",
+    "self_id": "机器人QQ号",
+    "group_whitelist": ["群号1"],
+    "private_whitelist": ["你的QQ号"],
+    "allow_all_private": false,
+    "min_interval_s": 3,
+    "max_per_min": 10,
+    "interject_prob": 0.0
+  },
+
+  "bilibili": {
+    "enabled": false,
+    "credential": { "sessdata": "", "bili_jct": "", "buvid3": "", "dedeuserid": "机器人B站UID" },
+    "poll_interval_s": 90,
+    "reply_at": true,
+    "reply_replies": true,
+    "dm_whitelist": [],
+    "auto_send": false,
+    "comment_min_interval_s": 15,
+    "comment_max_per_hour": 20,
+    "dm_min_interval_s": 10,
+    "dm_max_per_hour": 20
+  }
+}

@@ -1,0 +1,10 @@
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+demo_data/
+*.log
+.DS_Store
+config.json
+!core/config.example.json
