@@ -147,7 +147,7 @@ QQ 用 **NapCat + 正向 WebSocket**：soulcore 主动连 NapCat，收发同一�
 ## 开发
 
 ```bash
-npm test                       # 14 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 68 个 Python 测试
+npm test                       # 14 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 91 个 Python 测试
 cd core && python -m soulcore --mock demo    # 离线演示：模拟一整天
 cd core && python -m soulcore --mock chat    # 命令行里直接和她聊（/skip 快进时间，/event 触发事件）
 ```

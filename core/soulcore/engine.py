@@ -20,6 +20,7 @@ from .llm import make_llm, LLMError
 from .appraisal import appraise
 from .extractor import extract, summarize, turn_importance
 from .persona import load_card, build_system, build_context_block
+from .stickers import StickerLib, prompt_hint
 
 log = logging.getLogger("soulcore")
 
@@ -53,6 +54,9 @@ class Engine:
         pcfg = cfg.get("persona", {})
         self.name = pcfg.get("name", "小汐")
         self.card = load_card(pcfg, base_dir)
+        scfg = (cfg.get("qq") or {}).get("sticker") or {}
+        self.stickers = StickerLib(scfg.get("dir"), enabled=bool(scfg.get("enabled", True)))
+        self._bili_busy = threading.Event()
         self.lock = threading.RLock()
         self.bg = ThreadPoolExecutor(max_workers=1, thread_name_prefix="soulcore-bg")
         self._emo_file = os.path.join(self.data_dir, "emotion.json")
@@ -210,7 +214,23 @@ class Engine:
             mood_text = self.emo.describe(self.prev_label)
             self.prev_label = self.emo.label(self.prev_label)
             now = self.clock()
-        system = build_system(self.card, ev, mood_text, rel, mems, person, now)
+        hint = ""
+        lib = getattr(self, "stickers", None)
+        if ev.platform == "qq" and lib is not None and lib.enabled:
+            hint = prompt_hint(lib, 20)
+        system = build_system(self.card, ev, mood_text, rel, mems, person, now, emoji_hint=hint)
+        bcfg = self._bili_cfg()
+        if ev.platform == "qq" and bcfg and bcfg.get("chat_trigger", True) and self._wants_bili(ev.text):
+            got = self._bili_cached()
+            if not got and self._bili_sync_allowed(bcfg):
+                # 还没有缓存：同步刷一次。失败也记时间，chat_min_gap_s 内不再同步重试，
+                # 否则 B站一直失败（超时/风控/候选看完）时每句触发词都要卡一次
+                self._bili_fetch(bcfg)
+                got = self._bili_cached()
+            if got:
+                system += ("\n\n## 你刚刷到的\n" + got
+                           + "\n（这是你刚在B站看到的，可以自然提起，别像在汇报。）")
+            self._bili_refresh_async()
         group_like = ev.scene in ("group", "comment")
         history = []
         for t in recent:
@@ -395,6 +415,86 @@ class Engine:
             self.system_event(ev)
         return ev
 
+    # ------------------------------------------------------------------ B站
+    _BILI_TRIGGERS = ("刷个视频", "刷视频", "刷b站", "刷B站", "看个视频", "看点视频",
+                      "看看b站", "看看B站", "有什么好看的", "最近看什么", "你在干嘛", "在干嘛呢")
+
+    def _bili_cfg(self) -> dict:
+        """刷 B站只在 QQ 开着时才算数：只用 DSH 的人不该被它碰 B站账号。"""
+        qcfg = self.cfg.get("qq") or {}
+        bcfg = qcfg.get("bili") or {}
+        if not bcfg.get("enabled") or not qcfg.get("enabled"):
+            return {}
+        return bcfg
+
+    def _wants_bili(self, text: str) -> bool:
+        t = (text or "").lower()
+        return any(k.lower() in t for k in self._BILI_TRIGGERS)
+
+    def _bili_remember(self, titles: list[str]) -> str:
+        """只把视频标题写进记忆。评论区是公开内容，绝不入库。"""
+        if not titles:
+            return ""
+        text = "我在B站刷到：" + "；".join(f"《{t}》" for t in titles[:3])
+        self.store.meta_set("bili_last_text", text)
+        self.store.meta_set("bili_last_at", self.clock())
+        with self.lock:
+            # trust=known：QQ 场景能召回（owner+known），本地 DSH 编程会话只看 owner
+            self.store.write("core/self/bili", "fact", text, 0.55,
+                             tags=["bili", "watch"], trust="known")
+        return text
+
+    def _bili_sync_allowed(self, bcfg: dict) -> bool:
+        """聊天里同步刷的闸门：后台正在刷、或 chat_min_gap_s 内同步试过，就不再同步刷。
+        放行时同时记下 bili_watch_at，紧接着的后台刷不会再重复一遍。"""
+        if self._bili_busy.is_set():
+            return False
+        now = self.clock()
+        gap = int(bcfg.get("chat_min_gap_s", 600))
+        if now - float(self.store.meta_get("bili_sync_at", 0) or 0) < gap:
+            return False
+        self.store.meta_set("bili_sync_at", now)
+        self.store.meta_set("bili_watch_at", now)
+        return True
+
+    def _bili_fetch(self, bcfg: dict) -> dict:
+        hit = {}
+        try:
+            from .bili_watch import watch_once
+            hit = watch_once(bcfg) or {}
+        except Exception as ex:
+            log.warning("刷B站失败：%s", ex)
+        if hit.get("titles"):
+            self._bili_remember(hit["titles"])
+        return hit
+
+    def _bili_worker(self, bcfg: dict) -> None:
+        try:
+            self._bili_fetch(bcfg)
+        finally:
+            self._bili_busy.clear()
+
+    def _bili_refresh_async(self) -> None:
+        """后台线程刷一次，不让 QQ 回复等它。"""
+        bcfg = self._bili_cfg()
+        if not bcfg or self._bili_busy.is_set():
+            return
+        every = max(30, int(bcfg.get("every_min", 180))) * 60
+        last = float(self.store.meta_get("bili_watch_at", 0) or 0)
+        if self.clock() - last < every:
+            return
+        self.store.meta_set("bili_watch_at", self.clock())
+        self._bili_busy.set()
+        threading.Thread(target=self._bili_worker, args=(bcfg,), daemon=True,
+                         name="bili-watch").start()
+
+    def _maybe_bili_watch(self) -> bool:
+        self._bili_refresh_async()
+        return True
+
+    def _bili_cached(self) -> str:
+        return str(self.store.meta_get("bili_last_text", "") or "")
+
     def tick(self) -> dict:
         """定期维护：冷却、合并摘要、查余额。建议每 10~30 分钟调一次。"""
         with self.lock:
@@ -422,6 +522,11 @@ class Engine:
         if every > 0 and self.clock() - last >= every:
             self.store.meta_set("balance_checked", self.clock())
             res["balance_event"] = self.check_balance()
+        try:
+            res["bili_watch"] = bool(self._maybe_bili_watch())
+        except Exception as ex:
+            log.warning("B站后台刷失败：%s", ex)
+            res["bili_watch"] = False
         return res
 
     def state(self) -> dict:

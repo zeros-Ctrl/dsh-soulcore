@@ -11,6 +11,7 @@ import json, logging, queue, random, re, threading, time, urllib.request
 
 from ..events import Event
 from ..ratelimit import RateLimiter
+from ..stickers import parse_reply, strip_tags
 
 log = logging.getLogger("soulcore.qq")
 CQ = re.compile(r"\[CQ:(\w+)((?:,[^\]]*)?)\]")
@@ -135,14 +136,33 @@ class OneBotAdapter:
             return False
         if self.cfg.get("typing_delay", True):
             time.sleep(min(6.0, 0.8 + len(text) / 10))
+        segs = self._segments(text)
+        if not segs:
+            return False
         if rt["type"] == "group":
             msg = []
             if rt.get("message_id") is not None:
                 msg.append({"type": "reply", "data": {"id": str(rt["message_id"])}})
-            msg.append({"type": "text", "data": {"text": text}})
+            msg.extend(segs)
             return self._api("send_group_msg", {"group_id": int(rt["group_id"]), "message": msg})
-        return self._api("send_private_msg", {"user_id": int(rt["user_id"]),
-                                              "message": [{"type": "text", "data": {"text": text}}]})
+        return self._api("send_private_msg", {"user_id": int(rt["user_id"]), "message": segs})
+
+    def _segments(self, text: str) -> list[dict]:
+        """把文字里的 [表情:x] / [图:x] 切成消息段；认不出的标记删掉，别漏成原文。"""
+        lib = getattr(self.engine, "stickers", None)
+        max_images = int((self.cfg.get("sticker") or {}).get("max_images", 1))
+        try:
+            segs = parse_reply(text, lib, max_images=max_images)
+        except Exception as ex:
+            log.warning("表情解析失败，退回纯文字：%s", ex)
+            segs = []
+        if segs:
+            return segs
+        plain = strip_tags(text)
+        if plain.strip():
+            return [{"type": "text", "data": {"text": plain}}]
+        log.info("回复只有认不出的表情标记，不发送：%r", (text or "")[:60])
+        return []
 
     def _api(self, action: str, body: dict) -> bool:
         if self.api_fn is not None:
