@@ -63,6 +63,54 @@ class TestBiliSyncGate(unittest.TestCase):
             eng.close()
 
 
+class TestBiliPrompt(unittest.TestCase):
+    """实际使用中发现：抓取成功了，她却一直说"刷不了"。原因是提示词只在触发时塞一段素材，
+    从没告诉她"你会刷"；触发词又窄（"你现在可以访问到b站了吗"不触发）；旧缓存也写成"刚刷到"。"""
+
+    def _eng(self, clk, **bili):
+        return make_engine(tempfile.mkdtemp(), clk, qq={"enabled": True, "bili": {"enabled": True, **bili}})[0]
+
+    def test_ability_always_in_qq_prompt(self):
+        clk = Clock()
+        with mock.patch("soulcore.bili_watch.watch_once", return_value={}):
+            eng = self._eng(clk)
+            ctx = ask(eng, "在吗")                         # 不是触发词也要有能力说明
+            self.assertIn("你会刷B站", ctx["system"])
+            self.assertIn("只看得到视频标题", ctx["system"])
+            local = eng.prepare(Event("local", "project", "p", "owner", "主人", "B站视频怎么爬"))
+            self.assertNotIn("你会刷B站", local["system"], "本地 DSH 编程会话不需要这段")
+            eng.close()
+        eng2, _ = make_engine(tempfile.mkdtemp(), Clock(), qq={"enabled": True})   # bili 默认关
+        self.assertNotIn("你会刷B站", ask(eng2, "在吗")["system"])
+        eng2.close()
+
+    def test_broader_triggers_and_age(self):
+        clk = Clock()
+        with mock.patch("soulcore.bili_watch.watch_once", return_value={}):
+            eng = self._eng(clk)
+            eng._bili_remember(["猫咪小镇上的喵当劳开业啦"])
+            clk.t += 23 * 60
+            ctx = ask(eng, "你现在可以访问到b站了吗")          # 以前不触发
+            self.assertIn("喵当劳", ctx["system"])
+            self.assertIn("23 分钟前刷的", ctx["system"])
+            self.assertIn("不是对方告诉你的", ctx["system"])
+            self.assertNotIn("你刚刷到的", ctx["system"])
+            clk.t += 3 * 3600
+            self.assertIn("3 小时前刷的", ask(eng, "最近有啥好玩的视频")["system"])
+            for text in ("今天天气不错", "刷个牙去"):          # 不相干的话不加"最近刷到的"段落
+                # （标题本身存在 core/self/bili 里，普通记忆检索偶尔召回是正常的）
+                self.assertNotIn("你最近刷到的", ask(eng, text)["system"], text)
+            eng.close()
+
+    def test_nothing_cached_says_dont_make_up(self):
+        clk = Clock()
+        with mock.patch("soulcore.bili_watch.watch_once", return_value={}):
+            eng = self._eng(clk)
+            ctx = ask(eng, "刷到啥b站视频了")
+            self.assertIn("别编视频名", ctx["system"])
+            eng.close()
+
+
 class TestWatchOnceNoComments(unittest.TestCase):
     FEED = "  1. BV1xx411c7mD    60s  弹幕     12  播放     3456  某个视频标题  @某UP主 \n"
 

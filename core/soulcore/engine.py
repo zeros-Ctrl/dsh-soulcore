@@ -24,6 +24,13 @@ from .stickers import StickerLib, prompt_hint
 
 log = logging.getLogger("soulcore")
 
+# QQ 开着刷 B站 时常驻进提示词：说清楚她能做什么、看得到什么
+BILI_ABILITY = ("## 你会刷B站\n"
+                "你可以自己去刷B站首页推荐，后台也会时不时自己刷一下。"
+                "你只看得到视频标题和UP主，看不到画面、声音和评论区。\n"
+                "被问到能不能刷B站时照实说：能刷，但只看得到标题；别说自己刷不了，也别假装看过视频内容。"
+                "之前说过刷不了的话以这里为准。")
+
 
 def used_in_reply(memory: str, reply: str) -> bool:
     """这条记忆是不是真的被用上了：回复里出现了它的大部分关键词。
@@ -220,17 +227,23 @@ class Engine:
             hint = prompt_hint(lib, 20)
         system = build_system(self.card, ev, mood_text, rel, mems, person, now, emoji_hint=hint)
         bcfg = self._bili_cfg()
-        if ev.platform == "qq" and bcfg and bcfg.get("chat_trigger", True) and self._wants_bili(ev.text):
-            got = self._bili_cached()
-            if not got and self._bili_sync_allowed(bcfg):
-                # 还没有缓存：同步刷一次。失败也记时间，chat_min_gap_s 内不再同步重试，
-                # 否则 B站一直失败（超时/风控/候选看完）时每句触发词都要卡一次
-                self._bili_fetch(bcfg)
+        if ev.platform == "qq" and bcfg:
+            # 能力说明常驻：不然她只在触发时看到一段素材，不知道自己"会刷"，
+            # 又会顺着历史里自己说过的"刷不了"继续否认
+            system += "\n\n" + BILI_ABILITY
+            if bcfg.get("chat_trigger", True) and self._wants_bili(ev.text):
                 got = self._bili_cached()
-            if got:
-                system += ("\n\n## 你刚刷到的\n" + got
-                           + "\n（这是你刚在B站看到的，可以自然提起，别像在汇报。）")
-            self._bili_refresh_async()
+                if not got and self._bili_sync_allowed(bcfg):
+                    # 还没有缓存：同步刷一次。失败也记时间，chat_min_gap_s 内不再同步重试，
+                    # 否则 B站一直失败（超时/风控/候选看完）时每句触发词都要卡一次
+                    self._bili_fetch(bcfg)
+                    got = self._bili_cached()
+                if got:
+                    system += (f"\n\n## 你最近刷到的（{self._bili_age()}刷的）\n" + got
+                               + "\n（这是你自己在B站刷到的，不是对方告诉你的；可以自然提起，别像在汇报。）")
+                else:
+                    system += "\n\n（你这会儿还没刷到能说的内容：可以说待会儿去刷，别编视频名。）"
+                self._bili_refresh_async()
         group_like = ev.scene in ("group", "comment")
         history = []
         for t in recent:
@@ -416,8 +429,9 @@ class Engine:
         return ev
 
     # ------------------------------------------------------------------ B站
-    _BILI_TRIGGERS = ("刷个视频", "刷视频", "刷b站", "刷B站", "看个视频", "看点视频",
-                      "看看b站", "看看B站", "有什么好看的", "最近看什么", "你在干嘛", "在干嘛呢")
+    # 一提到 B站/视频 就带上最近刷到的（用缓存，没成本；同步去刷另有 chat_min_gap_s 闸门）
+    _BILI_TRIGGERS = ("b站", "bilibili", "哔哩", "视频", "up主", "有什么好看的", "最近看什么",
+                      "你在干嘛", "在干嘛呢")
 
     def _bili_cfg(self) -> dict:
         """刷 B站只在 QQ 开着时才算数：只用 DSH 的人不该被它碰 B站账号。"""
@@ -494,6 +508,20 @@ class Engine:
 
     def _bili_cached(self) -> str:
         return str(self.store.meta_get("bili_last_text", "") or "")
+
+    def _bili_age(self) -> str:
+        """最近一次刷到距现在多久：缓存可能是几小时前的，不能一律说"刚刷到"。"""
+        at = float(self.store.meta_get("bili_last_at", 0) or 0)
+        if not at:
+            return "之前"
+        m = max(0, int((self.clock() - at) // 60))
+        if m < 2:
+            return "刚刚"
+        if m < 60:
+            return f"{m} 分钟前"
+        if m < 24 * 60:
+            return f"{m // 60} 小时前"
+        return f"{m // (24 * 60)} 天前"
 
     def tick(self) -> dict:
         """定期维护：冷却、合并摘要、查余额。建议每 10~30 分钟调一次。"""
