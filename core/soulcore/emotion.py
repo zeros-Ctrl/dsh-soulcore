@@ -52,12 +52,16 @@ EVENTS: dict[str, EventSpec] = {
     "balance_low":     EventSpec(-0.40, 0.50, 0.50, social=False),
     "balance_out":     EventSpec(-0.70, 0.50, 0.60, social=False),
     "recharge":        EventSpec(+0.50, 0.40, 0.50, social=False),
+    # 主动聊天的反馈：主动找他，他回了 / 没回
+    "responded":       EventSpec(+0.35, 0.40, 0.30),
+    "ignored":         EventSpec(-0.30, 0.50, 0.40, social=False),
 }
 
 EVENT_CN = {
     "chat": "聊天", "praise": "被夸", "scold": "被凶", "apology": "道歉",
     "gift": "礼物", "success": "项目成功", "stranger_insult": "路人骂",
     "balance_low": "余额低", "balance_out": "没钱了", "recharge": "充值",
+    "responded": "主动找他、他回了", "ignored": "主动找他、他没回",
 }
 
 

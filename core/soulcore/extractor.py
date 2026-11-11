@@ -1,6 +1,9 @@
 """记忆抽取（输入门的"语义"部分）：把一段对话提炼成可长期保存的条目，并给出重要性。"""
 from __future__ import annotations
 import re
+import time
+
+from .timeparse import parse_due_string, parse_followup
 
 KINDS = ("fact", "preference", "decision", "todo", "person", "self")
 
@@ -9,6 +12,8 @@ EXTRACT_SYS = """TASK:EXTRACT 你是记忆整理器，负责从对话中提炼�
                "content": "一句完整、可脱离上下文理解的话，写明主语（谁）",
                "importance": 0.0-1.0,
                "pinned": true（名字/生日/过敏/长期身份这类永久事实，不遗忘）,
+               "due_at": "YYYY-MM-DD HH:MM（仅当对方提到将来某个具体时间要做的事：考试/答辩/面试/出行/上线…，
+                          填事情结束后适合问一句'怎么样了'的时刻；按[当前时间]换算成绝对时间；没有就不填）",
                "about": "user|self|channel|project",
                "project": "项目名（仅当 about=project）",
                "tags": ["可选标签"],
@@ -27,6 +32,10 @@ SUMMARY_SYS = """TASK:SUMMARIZE 把下面这段较早的聊天记录压缩成一
 
 _RULES = [
     (re.compile(r"记住|别忘了|记一下"), "fact", 0.9, "user"),
+    # 将来的具体事件（明天答辩、周五面试）：记成 todo，并解析出跟进时刻（主动聊天会在那之后问一句）
+    (re.compile(r"(明天|后天|大后天|今晚|今天|周[一二三四五六日天]|星期[一二三四五六日天]|礼拜[一二三四五六日天]|\d+号|\d+月\d+[日号])"
+                r".{0,14}(考试|答辩|面试|比赛|汇报|组会|开会|出差|体检|手术|上线|发布|截止|deadline|ddl|复试|初试|笔试|演讲|"
+                r"约会|看病|复查|搬家|入职|报到|评审|交论文|交报告|演出|考核|期末|期中|四六级|考驾照|科目)"), "todo", 0.7, "user"),
     (re.compile(r"决定|就用|改成|定了|采用|不用.{0,8}了"), "decision", 0.75, "channel"),
     (re.compile(r"喜欢|讨厌|不爱|爱吃|习惯|受不了"), "preference", 0.6, "user"),
     (re.compile(r"待办|TODO|todo|明天要|下次要|记得要"), "todo", 0.6, "channel"),
@@ -44,8 +53,10 @@ def is_question(text: str) -> bool:
     return bool(QUESTION.search((text or "").strip()))
 
 
-def heuristic_extract(transcript: str) -> list[dict]:
-    """无 LLM 时的兜底：逐行匹配关键词"""
+def heuristic_extract(transcript: str, now: float | None = None) -> list[dict]:
+    """无 LLM 时的兜底：逐行匹配关键词。now：解析"明天/周五"这类相对时间的参照时刻"""
+    import time as _time
+    now = now if now is not None else _time.time()
     out, seen = [], set()
     for line in transcript.splitlines():
         line = line.strip()
@@ -64,8 +75,12 @@ def heuristic_extract(transcript: str) -> list[dict]:
                 c = f"{speaker}说：{text}"
                 if c not in seen:
                     seen.add(c)
-                    out.append({"kind": kind, "content": c, "importance": imp, "about": about,
-                                "tags": [], "pinned": kind == "fact" and bool(IDENTITY.search(text))})
+                    item = {"kind": kind, "content": c, "importance": imp, "about": about,
+                            "tags": [], "pinned": kind == "fact" and bool(IDENTITY.search(text))}
+                    due = parse_followup(text, now)
+                    if due:
+                        item["due_at"] = due
+                    out.append(item)
                 break
     return out
 
@@ -101,12 +116,15 @@ def extract(llm, turns, path: str) -> list[dict]:
     text = format_transcript(turns)
     if not text.strip():
         return []
+    # "明天/周五"要按说这句话的时间来算，不是按提炼的时间（提炼每 6 轮才跑一次）
+    ref = max((getattr(t, "created", 0) or 0 for t in turns), default=0) or time.time()
+    now_s = time.strftime("%Y-%m-%d %H:%M %A", time.localtime(ref))
     try:
         res = llm.chat_json([{"role": "system", "content": EXTRACT_SYS},
-                             {"role": "user", "content": f"[会话位置] {path}\n[对话]\n{text}"}])
+                             {"role": "user", "content": f"[会话位置] {path}\n[当前时间] {now_s}\n[对话]\n{text}"}])
         mems = res.get("memories", [])
     except Exception:
-        mems = heuristic_extract(text)
+        mems = heuristic_extract(text, ref)
     clean = []
     for m in mems if isinstance(mems, list) else []:
         if not isinstance(m, dict) or not m.get("content"):
@@ -116,11 +134,21 @@ def extract(llm, turns, path: str) -> list[dict]:
             imp = float(m.get("importance", 0.5))
         except (TypeError, ValueError):
             imp = 0.5
+        due = m.get("due_at")
+        if isinstance(due, str):
+            due = parse_due_string(due)
+        elif not isinstance(due, (int, float)):
+            due = None
+        if due is None and kind in ("todo", "fact", "decision"):
+            due = parse_followup(str(m["content"]), ref)      # LLM 没给就用规则兜底
+        if due is not None and due <= ref:
+            due = None                                         # 过去的时间不跟进
         clean.append({"kind": kind, "content": str(m["content"])[:500], "importance": max(0.0, min(1.0, imp)),
                       "about": m.get("about", "channel"), "project": str(m.get("project") or "").strip(),
                       "tags": [str(t) for t in (m.get("tags") or [])][:6],
                       "keywords": [str(t)[:20] for t in (m.get("keywords") or [])][:8],
-                      "pinned": bool(m.get("pinned")) or (kind == "fact" and bool(IDENTITY.search(str(m["content"]))))})
+                      "pinned": bool(m.get("pinned")) or (kind == "fact" and bool(IDENTITY.search(str(m["content"])))),
+                      "due_at": due})
     return clean
 
 

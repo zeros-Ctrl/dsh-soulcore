@@ -65,6 +65,9 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
             if u.path == "/v1/qq/status":
                 fn = ctl.get("qq_status")
                 return self._send(200, fn() if fn else {"enabled": False})
+            if u.path == "/v1/initiative/status":
+                it = ctl.get("initiative")
+                return self._send(200, it.status() if it else {"enabled": False, "available": False})
             if u.path == "/v1/memory/search":
                 extra = [x for x in qs.get("extra", [""])[0].split(",") if x]
                 its = engine.store.search(qs.get("q", [""])[0], qs.get("path", ["core"])[0],
@@ -95,6 +98,13 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                     from .adapters.onebot_ws import probe
                     return self._send(200, probe(str(b.get("ws_url") or ""), str(b.get("access_token") or ""),
                                                  timeout=float(b.get("timeout") or 8)))
+                if u.path in ("/v1/initiative/run", "/v1/initiative/draft"):
+                    it = ctl.get("initiative")
+                    if it is None:
+                        return self._send(503, {"error": "主动聊天不可用"})
+                    if u.path == "/v1/initiative/run":
+                        return self._send(200, it.check(force=bool(b.get("force", True))))
+                    return self._send(200, it.draft_action(str(b.get("id") or ""), str(b.get("action") or "")))
                 if u.path == "/v1/shutdown":
                     fn = ctl.get("shutdown")
                     if fn is None:
@@ -143,20 +153,23 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
     return H
 
 
-def bind_http_server(host: str, port: int, handler, attempts: int = 8) -> ThreadingHTTPServer:
+def bind_http_server(host: str, port: int, handler, attempts: int = 10) -> ThreadingHTTPServer:
     """绑定 HTTP 服务。port=0（随机端口，DSH 拉起子进程时就是这样）遇到 WinError 10013 时重试。
 
     Windows 上 Hyper-V / WinNAT 会在动态端口范围里保留大段端口（`netsh int ipv4 show
     excludedportrange protocol=tcp` 可以看到），系统偶尔把随机端口分到保留段里，bind 就报 10013。
-    再要一次端口通常就好了；指定了固定端口时不重试，直接报错让用户换端口。"""
+    再要一次端口通常就好了；指定了固定端口时不重试，直接报错让用户换端口。
+    实测这种拒绝有时会持续几秒（期间所有回环 bind 都失败），所以用指数退避，总共约 10 秒，
+    仍在 DSH 等待握手的 20 秒以内。"""
     for i in range(attempts):
         try:
             return ThreadingHTTPServer((host, port), handler)
         except OSError as ex:
             if port != 0 or getattr(ex, "winerror", None) != 10013 or i == attempts - 1:
                 raise
-            log.info("随机端口落在系统保留段（WinError 10013），重试 %d/%d", i + 1, attempts)
-            time.sleep(0.05)
+            delay = min(2.0, 0.05 * (2 ** i))
+            log.info("绑定端口被系统拒绝（WinError 10013），%.2f 秒后重试 %d/%d", delay, i + 1, attempts)
+            time.sleep(delay)
     raise RuntimeError("unreachable")
 
 
@@ -227,6 +240,24 @@ def serve(engine, cfg: dict, block: bool = True, lock_path: str | None = None,
             st.update(connected=None, self_id=onebot.self_id)
         return st
     ctl["qq_status"] = qq_status
+
+    # 主动聊天：发送走 QQ 私聊（没开 QQ 时只能生成草稿）
+    from .initiative import Initiative
+    qq_adapter = ws.onebot if ws is not None else onebot
+    initiative = Initiative(engine, sender=qq_adapter.send if qq_adapter is not None else None)
+    engine.initiative = initiative
+    ctl["initiative"] = initiative
+
+    def initiative_loop():
+        every = max(1.0, float(initiative.cfg.get("check_every_min", 5))) * 60
+        while not stop.wait(every):
+            try:
+                r = initiative.check()
+                if r.get("action") in ("sent", "draft", "error"):
+                    log.info("主动聊天：%s %s", r.get("action"), r.get("reason"))
+            except Exception:
+                log.exception("主动聊天检查失败")
+    threads.append(threading.Thread(target=initiative_loop, daemon=True, name="initiative"))
     # 在另一个线程里调 shutdown()：serve_forever 所在线程返回后走下面 finally 的清理（释放锁、关库）
     ctl["shutdown"] = lambda: threading.Thread(target=httpd.shutdown, daemon=True, name="shutdown").start()
     port = httpd.server_address[1]

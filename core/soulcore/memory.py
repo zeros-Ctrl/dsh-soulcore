@@ -21,7 +21,7 @@ from .embedding import cosines, pack
 from .extractor import is_question
 
 INDEX_VERSION = 2   # v2：索引里加入概念 token（见 concepts.py）
-SCHEMA_VERSION = 2  # v2：trust / pinned / 时间轴 / 墓碑
+SCHEMA_VERSION = 3  # v2：trust / pinned / 时间轴 / 墓碑；v3：due_at
 
 # 记忆来源的可信度。检索时按当前场景限制能召回哪些级别（见 search 的 allowed_trusts）。
 #   owner    ：主人本人（本地 DSH、主人的 QQ 私聊）
@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS items(
   pinned INTEGER DEFAULT 0,
   valid_from REAL,
   invalid_at REAL,
-  superseded_by INTEGER
+  superseded_by INTEGER,
+  due_at REAL
 );
 CREATE INDEX IF NOT EXISTS ix_items_path ON items(path, kind, status);
 CREATE INDEX IF NOT EXISTS ix_items_created ON items(created);
@@ -94,6 +95,7 @@ _MIGRATIONS = {
     "valid_from": "REAL",
     "invalid_at": "REAL",
     "superseded_by": "INTEGER",
+    "due_at": "REAL",          # 适合跟进的时刻（主动聊天的"跟进"念头用）
 }
 
 # 老条目没有 trust：按路径回填。保守起见，群聊/评论区一律降级。
@@ -127,6 +129,7 @@ class Item:
     valid_from: Optional[float] = None
     invalid_at: Optional[float] = None
     superseded_by: Optional[int] = None
+    due_at: Optional[float] = None
     score: float = 0.0
     weight_now: float = 0.0
 
@@ -177,7 +180,8 @@ class MemoryStore:
     def write(self, path: str, kind: str, content: str, importance: float, *, role: str = "",
               speaker: str = "", tags: Iterable[str] = (), user_id: str = "", dedup: bool = True,
               ts: float | None = None, mirror: bool = True, trust: str = "owner",
-              pinned: bool = False, by_tombstone_ok: bool = False) -> Optional[int]:
+              pinned: bool = False, by_tombstone_ok: bool = False,
+              due_at: float | None = None) -> Optional[int]:
         """写一条记忆。
 
         trust          来源可信度（见 TRUST_LEVELS）。检索时按场景过滤，默认 owner。
@@ -204,15 +208,18 @@ class MemoryStore:
             if merged is None:
                 cur = self.db.execute(
                     "INSERT INTO items(path,kind,role,speaker,content,importance,tau_h,created,last_access,"
-                    "tags,user_id,trust,pinned,valid_from) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "tags,user_id,trust,pinned,valid_from,due_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (path, kind, role, speaker, content, float(importance), tau, now, now, tag_s, user_id,
-                     trust, 1 if pinned else 0, now))
+                     trust, 1 if pinned else 0, now, due_at))
                 iid = cur.lastrowid
                 self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)",
                                 (iid, index_text(content + " " + tag_s + " " + speaker)))
                 self.db.commit()
             else:
                 iid = merged
+                if due_at is not None:
+                    self.db.execute("UPDATE items SET due_at=? WHERE id=? AND due_at IS NULL", (due_at, iid))
+                    self.db.commit()
         row = None
         if merged is not None:
             row = self.db.execute("SELECT content, importance FROM items WHERE id=?", (iid,)).fetchone()
@@ -647,6 +654,17 @@ class MemoryStore:
         with self.lock:
             self.db.execute("INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", (k, json.dumps(v, ensure_ascii=False)))
             self.db.commit()
+
+    def due_items(self, now: float, *, lookback_h: float = 72, trusts: Iterable[str] = ("owner",)) -> list[Item]:
+        """到了该跟进的时刻、但还没过太久（默认 3 天内）的条目。只取可信来源，避免陌生人的话驱动她主动发消息。"""
+        trusts = [t for t in trusts if t in TRUST_RANK] or ["owner"]
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT * FROM items WHERE due_at IS NOT NULL AND due_at<=? AND due_at>=? "
+                "AND status NOT IN ('deleted','merged') AND invalid_at IS NULL AND trust IN (%s) "
+                "ORDER BY due_at DESC LIMIT 20" % ",".join("?" * len(trusts)),
+                (now, now - lookback_h * 3600, *trusts)).fetchall()
+        return [_item(r) for r in rows]
 
     def stats(self) -> dict:
         with self.lock:

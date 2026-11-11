@@ -15,7 +15,12 @@ DEFAULTS = {
                "consolidate_min": 30, "beta": 0.3, "tau_hours": {}, "touch_mode": "recency"},
     "balance": {"check_every_min": 60, "low_threshold": 5.0, "recharge_min": 5.0},
     "server": {"host": "127.0.0.1", "port": 8765, "token": "", "tick_every_min": 15},
-    "service": {"mode": "follow_dsh"},        # follow_dsh | resident
+    "service": {"mode": "follow_dsh"},
+    # 主动聊天（见 initiative.py）：默认关闭；打开后默认试运行，只生成草稿不真的发
+    "initiative": {"enabled": False, "dry_run": True, "base_rate_per_hour": 0.15,
+                   "quiet_hours": ["00:00", "09:00"], "max_per_day": 3, "min_gap_hours": 3,
+                   "recent_activity_skip_min": 30, "max_unanswered": 2, "reply_window_hours": 4,
+                   "thought_threshold": 0.45, "check_every_min": 5},        # follow_dsh | resident
     "qq": {"enabled": False, "transport": "ws", "ws_url": "ws://127.0.0.1:3001",
            "api_base": "http://127.0.0.1:3000", "access_token": "", "self_id": "",
            "group_whitelist": [], "private_whitelist": [], "allow_all_private": False,

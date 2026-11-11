@@ -58,6 +58,7 @@ class Engine:
         self._emo_file = os.path.join(self.data_dir, "emotion.json")
         self.emo = self._load_emotion()
         self.prev_label = None
+        self.initiative = None          # 主动聊天模块（serve() 里挂上；见 initiative.py）
         self._injected: dict[str, tuple[list, float]] = {}   # path → (上一轮注入的记忆, 时刻)
         # v0.4：主人档案统一到 core/people/owner，把老路径的条目迁过来，不然她会"忘记你"
         try:
@@ -167,6 +168,11 @@ class Engine:
             self.store.write(ev.path, "turn", ev.text, turn_importance(ev.text, ev.mentions_self, ev.scene),
                              role="user", speaker=ev.user_name or ev.user_id, user_id=ev.user_id,
                              ts=ev.ts, trust=self._trust(ev))
+            if self.initiative is not None and self._trust(ev) == "owner":
+                try:
+                    self.initiative.on_owner_message(ev)
+                except Exception as ex:
+                    log.warning("主动聊天状态更新失败：%s", ex)
             self._save_emotion()
             return info
 
@@ -283,7 +289,8 @@ class Engine:
             with self.lock:
                 if self.store.write(path, mm["kind"], mm["content"], mm["importance"], tags=tags,
                                     user_id=ev.user_id if about == "user" else "",
-                                    trust=trust, pinned=bool(mm.get("pinned"))):
+                                    trust=trust, pinned=bool(mm.get("pinned")),
+                                    due_at=mm.get("due_at")):
                     n += 1
         return n
 

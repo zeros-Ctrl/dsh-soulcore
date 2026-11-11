@@ -9,14 +9,15 @@ import socket
 import time
 
 
-def _retry(fn, attempts: int = 8):
+def _retry(fn, attempts: int = 10):
+    """指数退避，总共约 10 秒：实测这种拒绝有时会持续几秒，期间所有回环 bind 都失败。"""
     for i in range(attempts):
         try:
             return fn()
         except OSError as ex:
             if getattr(ex, "winerror", None) != 10013 or i == attempts - 1:
                 raise
-            time.sleep(0.05)
+            time.sleep(min(2.0, 0.05 * (2 ** i)))
 
 
 def bind_random(sock: socket.socket, host: str = "127.0.0.1") -> int:

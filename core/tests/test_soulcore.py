@@ -477,7 +477,10 @@ class TestV03(Base):
         self.assertEqual(trust["chat/qq/group/1"], "stranger")
         self.assertEqual(trust["chat/bilibili/comment/BV1"], "public")
         self.assertEqual(trust["project/p"], "owner")
-        self.assertEqual(s.meta_get("schema_version"), 2)
+        from soulcore.memory import SCHEMA_VERSION
+        self.assertEqual(s.meta_get("schema_version"), SCHEMA_VERSION)
+        cols = {r["name"] for r in s.db.execute("PRAGMA table_info(items)")}
+        self.assertIn("due_at", cols)          # v3：老库补上跟进时刻这一列
 
 
 if __name__ == "__main__":

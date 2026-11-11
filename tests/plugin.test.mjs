@@ -54,7 +54,13 @@ let ctx, plugin
 before(async () => {
   ctx = fakeCtx()
   plugin = apply(ctx, {}, { log: () => {} })
-  await plugin.core.start()
+  try {
+    await plugin.core.start()
+  } catch (e) {
+    // 后端起不来时把原因带出来（偶发的 WinError 10013 等），否则只能看到 14 个用例全挂
+    const st = plugin.core.status()
+    throw new Error(`后端启动失败：${e?.message}\nlastError=${st.lastError}\nstderr:\n${(st.stderrTail || []).join('\n')}`)
+  }
 })
 after(async () => {
   for (const d of ctx.effects) await d()
@@ -306,6 +312,19 @@ test('安装常驻：先让出锁 → 注册计划任务 → 接入常驻进程�
   r = await callRoute(c3, '/dsh-soulcore/api/service')
   assert.equal(r.body.supported, false)
   for (const d of [...c1.effects, ...c2.effects, ...c3.effects]) await d()
+})
+
+test('主动聊天：设置页能读状态、"让她现在想一想"，没填 QQ 号时说清楚原因', async () => {
+  const st = await callRoute(ctx, '/dsh-soulcore/api/initiative')
+  assert.equal(st.body.ok, true)
+  assert.equal(st.body.enabled, false)          // 默认关闭
+  assert.equal(st.body.dry_run, true)           // 打开后默认试运行
+  assert.ok(Array.isArray(st.body.drafts))
+  const r = await callRoute(ctx, '/dsh-soulcore/api/initiative/run', { method: 'POST', body: {} })
+  assert.equal(r.body.action, 'off')
+  assert.match(r.body.reason, /QQ 号/)
+  const d = await callRoute(ctx, '/dsh-soulcore/api/initiative/draft', { method: 'POST', body: { id: 'nope', action: 'send' } })
+  assert.equal(d.body.ok, false)
 })
 
 test('glue：压缩消息过滤、会话目录名', () => {

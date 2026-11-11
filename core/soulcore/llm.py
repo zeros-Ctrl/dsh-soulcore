@@ -90,7 +90,9 @@ class MockLLM:
         body = messages[-1]["content"]
         if "TASK:EXTRACT" in sys:
             from .extractor import heuristic_extract
-            return {"memories": heuristic_extract(body)}
+            from .timeparse import parse_due_string
+            m = re.search(r"\[当前时间\] (\d{4}-\d{2}-\d{2} \d{2}:\d{2})", body)
+            return {"memories": heuristic_extract(body, parse_due_string(m.group(1)) if m else None)}
         if "TASK:SUMMARIZE" in sys:
             lines = [l for l in body.splitlines() if l.strip()]
             return {"summary": "（摘要）" + "；".join(l[:20] for l in lines[:6])}
