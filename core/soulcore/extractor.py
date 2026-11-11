@@ -8,6 +8,7 @@ EXTRACT_SYS = """TASK:EXTRACT 你是记忆整理器，负责从对话中提炼�
 {"memories": [{"kind": "fact|preference|decision|todo|person|self",
                "content": "一句完整、可脱离上下文理解的话，写明主语（谁）",
                "importance": 0.0-1.0,
+               "pinned": true（名字/生日/过敏/长期身份这类永久事实，不遗忘）,
                "about": "user|self|channel|project",
                "project": "项目名（仅当 about=project）",
                "tags": ["可选标签"],
@@ -34,6 +35,8 @@ _RULES = [
 
 
 PERSONAL = re.compile(r"我的|我(很|超|特别|最|不|平时|一直)?(喜欢|讨厌|不爱|爱吃|习惯|受不了)|我(叫|是|在读|在.{0,4}(上学|工作)|养|住|属)|生日|我晚上|我早上")
+# 永久事实：名字、生日、过敏这类信息一旦记住就不该因为"很久没聊到"而消失
+IDENTITY = re.compile(r"生日|我叫|我的名字|名字叫|过敏|血型|老家|住址|家乡|属[相牛虎兔龙蛇马羊猴鸡狗猪]")
 QUESTION = re.compile(r"[?？]\s*$|吗\s*$|呢\s*$|^(为什么|为啥|怎么|什么|哪|几|谁|是不是|有没有)|(什么|哪|几点|几个|多少|怎么|为啥|为什么|吗)[^，。！,.!]{0,6}$")
 
 
@@ -61,7 +64,8 @@ def heuristic_extract(transcript: str) -> list[dict]:
                 c = f"{speaker}说：{text}"
                 if c not in seen:
                     seen.add(c)
-                    out.append({"kind": kind, "content": c, "importance": imp, "about": about, "tags": []})
+                    out.append({"kind": kind, "content": c, "importance": imp, "about": about,
+                                "tags": [], "pinned": kind == "fact" and bool(IDENTITY.search(text))})
                 break
     return out
 
@@ -115,7 +119,8 @@ def extract(llm, turns, path: str) -> list[dict]:
         clean.append({"kind": kind, "content": str(m["content"])[:500], "importance": max(0.0, min(1.0, imp)),
                       "about": m.get("about", "channel"), "project": str(m.get("project") or "").strip(),
                       "tags": [str(t) for t in (m.get("tags") or [])][:6],
-                      "keywords": [str(t)[:20] for t in (m.get("keywords") or [])][:8]})
+                      "keywords": [str(t)[:20] for t in (m.get("keywords") or [])][:8],
+                      "pinned": bool(m.get("pinned")) or (kind == "fact" and bool(IDENTITY.search(str(m["content"]))))})
     return clean
 
 

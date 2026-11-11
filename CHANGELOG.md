@@ -1,5 +1,89 @@
 # Changelog
 
+## 0.5.0 — 2026-11-11
+
+设置页 QQ 接入：不用改配置文件就能接上 QQ，并一键切换常驻运行。
+
+- **设置页新增「QQ 接入」卡片。** 包括：启用开关、你的 QQ 号、NapCat WebSocket 地址、Token、群白名单、群里的熟人、私聊白名单，顶部显示实时连接状态（已连接 / 机器人 QQ 号）。卡片里附三步接入说明。
+- **「测试连接」。** 另开一条连接问 NapCat 的 `get_login_info`，不影响正在运行的 QQ 连接。失败时给出能看懂的原因：没启动、端口不对、填成了 HTTP 或 WebUI 端口、token 不对、QQ 没登录。Token 没改时自动使用已保存的值。
+- **「安装常驻 / 卸载常驻」按钮。**
+  - 安装：先停掉 DSH 自己启动的后端让出锁，再注册并运行计划任务，然后等待接入常驻进程。
+  - 卸载：删除计划任务，停掉常驻进程，改由 DSH 启动后端。
+  - 切换期间禁止自动重连和拉起子进程，避免和常驻进程抢锁。常驻进程没起来时，自动回到由 DSH 启动，并提示原因。
+- **已接入常驻进程时保存设置，会自动重启常驻进程。** 流程是 `/v1/shutdown`，然后计划任务重新运行，再重新接入。之前只是提示"需要手动重启"。
+- **后端新增接口。** `GET /v1/qq/status`、`POST /v1/qq/test`、`POST /v1/shutdown`（优雅退出：释放锁、删除锁信息文件、关闭数据库）。CLI 新增 `service-start`。
+- **QQ 默认改为 WebSocket**（`qq.transport` 默认 `ws`）。HTTP 上报方式仍然可以在 `config.json` 里使用。
+- **主人的私聊自动放行。** 填了 `owner.qq` 就不用再把自己加进 `private_whitelist`。
+- **修复：** 未授权的 POST 请求现在会先读完请求体再返回 401。之前在 Windows 上，客户端看到的是"连接被重置"。
+- **修复：后端偶发启动失败（WinError 10013）。** Windows 的 Hyper-V / WinNAT 会在动态端口范围里保留大段端口，DSH 用随机端口启动后端时，偶尔会分到保留段，绑定被拒（之前要等约 2 秒后自动重启才恢复）。现在随机端口绑定遇到 10013 会立即重试；指定了固定端口时不重试，直接报错。测试里自己开端口的地方也统一走带重试的 `tests/netutil.py`，之前这会导致测试随机失败。
+- 测试：Python 43 → 54 个，JS 11 → 13 个。安装 / 卸载常驻的测试使用假的 core 和假的 CLI，不会真的注册计划任务。
+
+## 0.4.1 — 2026-11-11
+
+修复评审中复现的问题，每项都有回归测试（`core/tests/test_v041.py`、`tests/plugin.test.mjs`）。
+
+- **安全：额外分支也按可信度过滤。** 之前检索时，`extra_paths`（`core/self`、对方档案）完全不做 trust 过滤，群里陌生人诱导出的 `core/self` 条目可以进入本地 DSH 的上下文。现在只有当前分支本身不受限，额外分支和回退分支都按 `allowed_trusts` 过滤。0.3.0 的"已知取舍"里写的"core/self 在本地项目里召回不到"，到这一版才真正成立。
+- **数据丢失：人物档案迁移后被同步误删。** `move_path` 之前只改了数据库，没有搬 Markdown，第一次 `sync_markdown()` 就把迁过来的条目标成 deleted 并加了墓碑。现在 Markdown 文件会一起搬到新目录（合并到已有文件）；数据库里有、Markdown 里没有的条目会补一行。
+- **pinned 条目删不掉。** 检索条件之前是 `status='hot' OR pinned=1`，用户在 Markdown 里删掉的永久事实仍然会被召回。现在 pinned 只豁免"转冷"，不豁免 deleted 和 merged。
+- **常驻进程重启后 DSH 一直连不上。** 接入模式下，遇到连接被拒或 401（常驻进程重启后端口和 token 都会变），会重新读锁文件接入一次再重试；接不上就按正常流程自己拉起子进程。超时不触发重连。
+- **`npm test` 稳定失败（Windows EPERM）。** 插件卸载时没有等待后端退出：`ctx.effect` 里的 `core.stop()` 没有 return，测试清理目录时 Python 还占着 `memory.db`。真实 DSH 卸载插件时也会受影响。
+- **先抢锁，再创建 Engine。** 之前第二个 `serve` 进程会先跑一遍数据库迁移和人物档案合并，再发现自己是多余的。
+- **QQ 私聊可信度。** `allow_all_private` 放进来的陌生人私聊，之前也被算作 `known`；现在只有 `private_whitelist` 里的人才是 `known`。
+- **WebSocket 半开连接检测。** 空闲 `qq.ws_idle_timeout_s`（默认 75 秒）没有收到任何帧，就发一次 ping；再等一轮还没有回应，就判定断开并重连。之前 NapCat 进程被强杀时会一直阻塞，不会重连。
+- 测试：Python 35 → 43 个，JS 10 → 11 个。
+
+## 0.4.0 — 2026-11-11
+
+按文档第 2、3、4 步落地：单实例常驻、NapCat 正向 WebSocket、主人身份合并。
+
+- 单实例锁：`serve` 启动时在 `~/.dsh/soulcore/soulcore.lock` 写 `{pid, port, token, started, version}` 并加操作系统锁（Windows `msvcrt` / POSIX `fcntl`）。第二个实例抢不到锁就打印信息后退出，不会两个进程同时写 `memory.db`。
+- 接入已有进程：DSH 插件启动时先读锁 → 确认 pid 活着 → 用锁里的 token 打一次 `/v1/health`，通了就直接接入（`attached=true`），不再起子进程；DSH 退出只断开，不杀常驻进程。
+- 独立运行时不再允许空 token：没有 `SOULCORE_TOKEN`/配置 token 时自动生成随机 token 并写进锁文件，避免本机任何程序都能调 `/v1/chat`。
+- 常驻模式：`python -m soulcore -c <config> install-service` 注册登录时触发的 Windows 计划任务（优先 `pythonw.exe`，隐藏窗口），`uninstall-service` 卸载，`service-status` 查看。设置页保存时若接的是常驻进程，会提示"改动需重启常驻进程"而不是假装重启。
+- QQ 正向 WebSocket（`qq.transport="ws"`）：标准库实现的 RFC 6455 客户端（握手鉴权、掩码帧、分片重组、ping/pong、关闭帧、指数退避重连、按 `echo` 匹配 action 结果），发送复用 `send_private_msg`/`send_group_msg`；连上后自动 `get_login_info` 拿机器人 QQ 号。HTTP 上报保留为兼容。
+- 主人身份合并：`owner.qq` 的私聊与本地 DSH 共用 `core/people/owner`；老库里的 `core/people/local/owner` 和 `core/people/qq/<主人QQ>` 启动时自动迁过去；主人的 QQ 私聊可以召回项目决策/摘要，群里和其他人的私聊不行。
+- 测试：Python 29 → 35 个（新增单实例锁、第二个实例被拒、token 鉴权、锁文件接入、WS 收发往返、身份合并、项目记忆可见性），JS 9 → 10 个（新增"有常驻实例时直接接入，不再起第二个进程"）。
+
+### 已知取舍
+
+- 常驻模式下改 `config.json` 需要重启常驻进程（计划任务里结束再启动，或重新 `install-service`）。设置页会明确提示，不会偷偷把常驻进程杀掉。
+- WS 和 HTTP 上报二选一：`transport=ws` 时 `/onebot` 报告 503，避免同一条消息被处理两次。
+- `install-service` 只支持 Windows；Linux/macOS 需要自己写 systemd/launchd。
+
+## 0.3.0 — 2026-11-11
+
+按《dsh-soulcore 改进方案与 QQ 主动聊天设计》落地的第一批：记忆可信度、Markdown 回写、永久事实、用到才刷新。
+QQ 正向 WebSocket、单实例常驻、主人身份合并、主动聊天、PAD 情绪、公开基准评测**尚未实现**，见文末"还没做"。
+
+- 新增记忆可信度 `trust`（`owner / known / stranger / public`）：
+  - 写入时按"说话人 + 场景"定级：本地 DSH、主人的 QQ 私聊 = owner；白名单私聊和群里的熟人 = known；群里的陌生人 = stranger；B站评论区 = public。
+  - 检索时跨分支回退只召回允许的级别：本地项目只认 owner；QQ 私聊/群认 owner + known；B站评论区只认 public。**群聊和评论区的投毒内容不会再进入本地 agent 的上下文。**
+  - 合并（去重命中）时取更不可信的那个级别，一句话不会把陌生人的内容"洗白"；群聊摘要按原文里最低的级别落库。
+  - 老库自动迁移：`ALTER TABLE` 补列，并按路径回填（`chat/*/group/*` → stranger，`chat/bilibili/comment/*` → public，私聊/私信 → known，其余 owner）。
+- 修复 Markdown 回写把新内容改回旧版本：去重命中时同时重写 Markdown 镜像、重建 FTS、删掉旧向量（之前只改数据库）。
+- `_find_duplicate` 排除 `deleted` 和已失效的条目，避免删掉的记忆被"复活"。
+- 新增墓碑（`tombstones` 表）：用户在 Markdown 里删掉的条目，自动提炼不会再写回来；`remember` 工具等主动写入不受限。
+- 新增永久事实 `pinned`：名字、生日、过敏、老家这类信息不衰减、不转冷。提炼提示词和规则兜底都会识别。
+- 新增 `memory.touch_mode`，让"被注入"和"被用到"分开（实现 3.3，默认 `recency`）：
+  - `inject`：注入即刷新计时、访问次数 +1，和 v0.2 一致。
+  - `recency`（默认）：注入只刷新计时，不增加访问次数，去掉"越注入越重要"的正反馈。
+  - `used`：注入不刷新，只有主动 `memory_search` 或回复里确实用到才刷新。
+  - 固定随机种子后，30 天模拟的"答案可见"是 inject 88.6% / 95.7%，recency 88.6% / 94.3%（seed 42 / 7），used 90.0%（seed 42）；v0.2 的 inject 同样是 88.6% / 95.7%。同种子下 recency 与 inject 最多差 1 题。
+- 评测脚本 `bench/ab_offline.py` 现在会按 `AB_SEED` 固定情绪随机数，并支持 `AB_TOUCH` 指定 touch 模式：不固定种子时同一配置能在 88.6%–95.7% 之间波动，固定后 A/B 才可比。
+- 配置新增 `owner.qq`、`qq.group_known`、`memory.touch_mode`；设置页保存时接受 `owner` 段。
+- 测试：Python 17 → 27 个，新增投毒隔离、说话人定级、Markdown 去重回写、墓碑、永久事实、摘要可信度、三种 touch 模式、老库迁移。
+
+### 已知取舍
+
+- trust 按"说话人"定级，所以**主人在群里说的话**仍算 owner，能被本地项目召回；陌生人在群里说的话不会。这是有意的：不能因为路径是群聊就把主人的话降级。
+- 群里她自己的承诺（`core/self`）也带着群聊的 trust，在本地项目里召回不到。安全优先，暂不做例外。
+- `used` 模式在离线模拟里数值最好，但 MockLLM 的回复总会复述一条记忆，等于每轮都在"用到"，所以真实对话里的代价还没测准；默认用更稳的 `recency`。
+
+### 还没做
+
+单实例锁与常驻服务、QQ 正向 WebSocket、主人身份合并已在 **0.4.0** 完成。
+剩下：`initiative.py` 主动聊天、PAD 三维情绪、知识更新（`invalid_at` 字段已预留）、加权和检索打分、公开基准评测。
+
 ## 0.2.0 — 2026-11-10
 
 实验报告见 docs/benchmark/REPORT.md。

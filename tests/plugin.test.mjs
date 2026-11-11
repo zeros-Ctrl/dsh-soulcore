@@ -168,6 +168,146 @@ test('后端挂了不影响 DSH：pre-step 原样放行', async () => {
   await plugin.core.start()
 })
 
+test('有常驻实例时直接接入，不再起第二个进程', async () => {
+  const { CoreProcess } = await import('../lib/core-process.js')
+  assert.equal(plugin.core.attached, false)          // 这个实例是插件自己拉起的
+  const lockPath = path.join(process.env.SOULCORE_HOME, 'soulcore.lock')
+  const second = new CoreProcess({
+    python: plugin.core.python, coreDir: path.resolve('core'), configPath: path.join(process.env.SOULCORE_HOME, 'config.json'),
+    lockPath, log: () => {},
+  })
+  const info = await second.start()
+  assert.equal(second.attached, true)
+  assert.equal(second.child, null)
+  assert.equal(info.attached, true)
+  assert.equal(second.port, plugin.core.port)
+  const items = await second.request('GET', '/v1/state')
+  assert.ok(items.mood > 0 && items.mood < 1)
+  await second.stop()
+  assert.equal(second.ready, false)
+  assert.equal(plugin.core.ready, true)              // 常驻那个还在跑
+})
+
+test('常驻进程重启（端口和 token 变了）后自动重新接入，不用重启 DSH', async () => {
+  const { CoreProcess } = await import('../lib/core-process.js')
+  const dir = fs.mkdtempSync(path.join(TMP, 'reattach-'))
+  const lockPath = path.join(dir, 'soulcore.lock')
+  const writeLock = (port, token) => fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, port, token, version: 't' }))
+  let live = { port: 1111, token: 'old' }
+  const calls = []
+  const fetchImpl = async (url, opts) => {
+    const u = new URL(url)
+    calls.push(`${u.port}${u.pathname}`)
+    if (Number(u.port) !== live.port) throw new TypeError('fetch failed')     // 旧端口已经没人监听
+    if (opts?.headers?.Authorization !== `Bearer ${live.token}`) return { ok: false, status: 401, text: async () => '{"error":"unauthorized"}' }
+    return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, port: live.port }) }
+  }
+  const spawnImpl = () => { throw new Error('不应该自己拉子进程') }
+  writeLock(1111, 'old')
+  const cp = new CoreProcess({ python: 'x', coreDir: dir, configPath: path.join(dir, 'c.json'), lockPath, log: () => {}, fetchImpl, spawnImpl })
+  await cp.start()
+  assert.equal(cp.attached, true)
+  assert.equal((await cp.request('GET', '/v1/state')).port, 1111)
+
+  // 常驻进程重启：换了端口和 token，锁文件也更新了
+  live = { port: 2222, token: 'new' }
+  writeLock(2222, 'new')
+  assert.equal((await cp.request('GET', '/v1/state')).port, 2222)
+  assert.equal(cp.attached, true)
+  assert.equal(cp.port, 2222)
+
+  // 同端口但 token 变了（401）也能恢复
+  live = { port: 2222, token: 'newer' }
+  writeLock(2222, 'newer')
+  assert.equal((await cp.request('GET', '/v1/state')).port, 2222)
+
+  // 超时不是"进程没了"：不应该触发重新接入
+  const n = calls.length
+  cp.fetchImpl = async () => { const e = new Error('timeout'); e.name = 'TimeoutError'; throw e }
+  await assert.rejects(cp.request('GET', '/v1/state'))
+  assert.equal(cp.port, 2222)
+  assert.ok(calls.length === n)
+  await cp.stop()
+})
+
+test('设置页"测试连接"：连不上 NapCat 时给出可读提示', async () => {
+  const r = await callRoute(ctx, '/dsh-soulcore/api/qq/test', { method: 'POST', body: { ws_url: 'ws://127.0.0.1:1', access_token: '••••••' } })
+  assert.equal(r.status, 200)
+  assert.equal(r.body.ok, false)
+  assert.match(r.body.error, /连不上/)
+  assert.ok(r.body.hint)
+  const st = await callRoute(ctx, '/dsh-soulcore/api/state')
+  assert.equal(st.body.qq.enabled, false)          // 状态里带上 QQ 连接信息
+})
+
+function fakeCore({ attachOk = true, attached = false } = {}) {
+  const calls = []
+  return {
+    calls, ready: true, attached, switching: false, stopping: false, _ready: null,
+    start() { calls.push('start'); return Promise.resolve({}) },
+    stop() { calls.push('stop'); return Promise.resolve() },
+    restart() { calls.push('restart'); return Promise.resolve({}) },
+    shutdownBackend() { calls.push(`shutdown(switching=${this.switching})`); this.attached = false; return Promise.resolve(true) },
+    waitAttach() { calls.push('waitAttach'); if (attachOk) this.attached = true; return Promise.resolve(attachOk) },
+    status() { return { ready: true, attached: this.attached } },
+    request: async () => ({}),
+  }
+}
+
+test('安装常驻：先让出锁 → 注册计划任务 → 接入常驻进程；失败时回到 DSH 自己启动', async () => {
+  const cli = []
+  let installed = false
+  const runCli = async (args) => {
+    cli.push(args[0])
+    if (args[0] === 'install-service') { installed = true; return { code: 0, out: '已注册' } }
+    if (args[0] === 'uninstall-service') { installed = false; return { code: 0, out: '已删除' } }
+    if (args[0] === 'service-status') return { code: installed ? 0 : 1, out: '' }
+    return { code: 0, out: '' }
+  }
+  const c1 = fakeCtx(), core = fakeCore()
+  apply(c1, {}, { log: () => {}, core, runCli, platform: 'win32' })
+  let r = await callRoute(c1, '/dsh-soulcore/api/service', { method: 'POST', body: { action: 'install' } })
+  assert.equal(r.body.ok, true, JSON.stringify(r.body))
+  assert.equal(r.body.installed, true)
+  assert.equal(r.body.attached, true)
+  // 关键顺序：切换期间（switching=true）先停掉自己的后端，再装，再等接入
+  assert.deepEqual(core.calls.slice(1), ['shutdown(switching=true)', 'waitAttach'])
+  assert.deepEqual(cli.slice(0, 1), ['install-service'])
+  assert.equal(core.switching, false)
+  assert.equal(config.readConfig(process.env.SOULCORE_HOME).service.mode, 'resident')
+
+  // 已接入常驻时保存设置：让常驻进程退出 → 计划任务重新拉起 → 重新接入
+  cli.length = 0; core.calls.length = 0
+  r = await callRoute(c1, '/dsh-soulcore/api/settings', { method: 'POST', body: { config: { emotion: { sensitivity: 1.1 } } } })
+  assert.equal(r.body.restarted, true, JSON.stringify(r.body))
+  assert.deepEqual(core.calls, ['shutdown(switching=true)', 'waitAttach'])
+  assert.deepEqual(cli, ['service-start'])
+
+  // 卸载：删任务 → 停常驻进程 → DSH 自己拉起后端
+  cli.length = 0; core.calls.length = 0
+  r = await callRoute(c1, '/dsh-soulcore/api/service', { method: 'POST', body: { action: 'uninstall' } })
+  assert.equal(r.body.ok, true)
+  assert.equal(r.body.installed, false)
+  assert.deepEqual(core.calls, ['shutdown(switching=true)', 'start'])
+  assert.equal(config.readConfig(process.env.SOULCORE_HOME).service.mode, 'follow_dsh')
+
+  // 常驻进程没起来：回退到 DSH 自己启动，并告诉用户
+  const c2 = fakeCtx(), core2 = fakeCore({ attachOk: false })
+  apply(c2, {}, { log: () => {}, core: core2, runCli, platform: 'win32' })
+  r = await callRoute(c2, '/dsh-soulcore/api/service', { method: 'POST', body: { action: 'install' } })
+  assert.equal(r.body.ok, false)
+  assert.match(r.body.error, /没等到常驻进程/)
+  assert.equal(core2.calls.at(-1), 'start')
+  assert.equal(core2.switching, false)
+
+  // 非 Windows：只提示不支持
+  const c3 = fakeCtx()
+  apply(c3, {}, { log: () => {}, core: fakeCore(), runCli, platform: 'linux' })
+  r = await callRoute(c3, '/dsh-soulcore/api/service')
+  assert.equal(r.body.supported, false)
+  for (const d of [...c1.effects, ...c2.effects, ...c3.effects]) await d()
+})
+
 test('glue：压缩消息过滤、会话目录名', () => {
   assert.equal(glue.channelOf(agent('a', 'C:\\Users\\me\\proj-x\\')), 'proj-x')
   assert.equal(glue.channelOf({ session: { id: 'abc' } }), 'session-abc')

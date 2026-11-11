@@ -75,9 +75,15 @@ def main():
     cfg["data_dir"] = tmp
     cfg["memory"]["extract_every"] = 6
     cfg["memory"]["top_k"] = 6
+    if os.environ.get("AB_TOUCH"):
+        cfg["memory"]["touch_mode"] = os.environ["AB_TOUCH"]
     if "--embed" in sys.argv:
         cfg["memory"]["embedding"] = {"provider": "fastembed", "model": "BAAI/bge-small-zh-v1.5", "cache_dir": "/tmp/fe_cache"}
     eng = Engine(cfg, tmp, llm=MockLLM(), clock=lambda: T[0])
+    # 情绪里的随机抽样会改变她回复的措辞，进而影响存下来的 turn；固定它，A/B 才可比
+    seed = int(os.environ.get("AB_SEED", "42"))
+    eng.emo.rng_noise.seed(seed)
+    eng.emo.rng_event.seed(seed)
     # ---- 30 天的对话 ----
     plan = list(SAY.items()); rnd.shuffle(plan)
     day_of = {mid: rnd.randrange(0, 25) for mid, _ in plan}

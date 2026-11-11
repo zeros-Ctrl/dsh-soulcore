@@ -11,17 +11,22 @@ HTTP 服务：给任意 harness（JS/TS/Python 都行）调用的钩子接口 + 
   POST /onebot                        OneBot v11 HTTP 上报地址
 """
 from __future__ import annotations
-import json, logging, os, sys, threading
+import json, logging, os, secrets, sys, threading, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
+from . import __version__
 from .events import Event
 from .emotion import EVENTS
 
 log = logging.getLogger("soulcore.server")
 
 
-def make_handler(engine, onebot=None, token: str = ""):
+def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
+    """ctl：运行时控制回调，由 serve() 在建好 httpd 之后填入
+         qq_status() -> dict   当前 QQ 连接状态（设置页显示）
+         shutdown()            优雅退出（设置页切换常驻 / 重启常驻进程用）"""
+    ctl = ctl if ctl is not None else {}
     class H(BaseHTTPRequestHandler):
         server_version = "soulcore/0.1"
 
@@ -57,23 +62,46 @@ def make_handler(engine, onebot=None, token: str = ""):
                 return self._send(200, engine.state())
             if u.path == "/v1/persona":
                 return self._send(200, {"name": engine.name, "text": engine.card_text()})
+            if u.path == "/v1/qq/status":
+                fn = ctl.get("qq_status")
+                return self._send(200, fn() if fn else {"enabled": False})
             if u.path == "/v1/memory/search":
                 extra = [x for x in qs.get("extra", [""])[0].split(",") if x]
                 its = engine.store.search(qs.get("q", [""])[0], qs.get("path", ["core"])[0],
-                                          k=int(qs.get("k", ["10"])[0]), touch=False, extra_paths=extra)
+                                          k=int(qs.get("k", ["10"])[0]),
+                                          touch=qs.get("touch", ["0"])[0].lower() in ("1", "true", "yes"),
+                                          extra_paths=extra)
                 return self._send(200, [{"id": i.id, "path": i.path, "kind": i.kind, "content": i.content,
-                                         "score": round(i.score, 4), "weight": round(i.weight_now, 4)} for i in its])
+                                         "trust": i.trust, "pinned": bool(i.pinned),
+                                         "score": round(i.score, 4), "weight": round(i.weight_now, 4)}
+                                        for i in its])
             return self._send(404, {"error": "not found"})
 
         def do_POST(self):
             u = urlparse(self.path); qs = parse_qs(u.query)
             if not self._auth(qs):
+                # 先把请求体读掉再回 401：否则 Windows 上客户端看到的是"连接被重置"而不是 401
+                try:
+                    self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 1 << 20))
+                except (OSError, ValueError):
+                    pass
                 return self._send(401, {"error": "unauthorized"})
             try:
                 b = self._body()
             except json.JSONDecodeError:
                 return self._send(400, {"error": "bad json"})
             try:
+                if u.path == "/v1/qq/test":
+                    from .adapters.onebot_ws import probe
+                    return self._send(200, probe(str(b.get("ws_url") or ""), str(b.get("access_token") or ""),
+                                                 timeout=float(b.get("timeout") or 8)))
+                if u.path == "/v1/shutdown":
+                    fn = ctl.get("shutdown")
+                    if fn is None:
+                        return self._send(503, {"error": "shutdown not available"})
+                    self._send(200, {"ok": True, "pid": os.getpid()})
+                    fn()
+                    return None
                 if u.path == "/onebot":
                     if onebot is None:
                         return self._send(503, {"error": "qq adapter disabled"})
@@ -115,15 +143,59 @@ def make_handler(engine, onebot=None, token: str = ""):
     return H
 
 
-def serve(engine, cfg: dict, block: bool = True):
+def bind_http_server(host: str, port: int, handler, attempts: int = 8) -> ThreadingHTTPServer:
+    """绑定 HTTP 服务。port=0（随机端口，DSH 拉起子进程时就是这样）遇到 WinError 10013 时重试。
+
+    Windows 上 Hyper-V / WinNAT 会在动态端口范围里保留大段端口（`netsh int ipv4 show
+    excludedportrange protocol=tcp` 可以看到），系统偶尔把随机端口分到保留段里，bind 就报 10013。
+    再要一次端口通常就好了；指定了固定端口时不重试，直接报错让用户换端口。"""
+    for i in range(attempts):
+        try:
+            return ThreadingHTTPServer((host, port), handler)
+        except OSError as ex:
+            if port != 0 or getattr(ex, "winerror", None) != 10013 or i == attempts - 1:
+                raise
+            log.info("随机端口落在系统保留段（WinError 10013），重试 %d/%d", i + 1, attempts)
+            time.sleep(0.05)
+    raise RuntimeError("unreachable")
+
+
+def serve(engine, cfg: dict, block: bool = True, lock_path: str | None = None,
+          version: str = __version__, lock=None):
+    """启动 HTTP 服务。
+
+    lock_path：单实例锁文件。抢不到锁说明已经有实例在跑，直接打印信息后退出（返回 None）。
+    version：写进锁文件，DSH 接入时用来判断"锁里是不是旧版本的后端"。
+    """
     scfg = cfg.get("server", {})
     onebot = None
+    ws = None
     stop = threading.Event()
     threads = []
-    if cfg.get("qq", {}).get("enabled"):
-        from .adapters.onebot import OneBotAdapter
-        onebot = OneBotAdapter(engine, cfg["qq"])
-        log.info("QQ(OneBot v11) 已启用，上报地址 http://%s:%s/onebot", scfg.get("host"), scfg.get("port"))
+    if lock is not None:
+        # 调用方（cli）已经在创建 Engine 之前抢到锁了：避免第二个实例先跑迁移再发现自己是多余的
+        lock_path = lock_path or lock.path
+    elif lock_path:
+        from .lockfile import InstanceLock
+        lock = InstanceLock(lock_path)
+        if not lock.acquire():
+            info = InstanceLock.read(lock_path) or {}
+            log.warning("已有 soulcore 在运行（pid=%s port=%s），本进程退出",
+                        info.get("pid"), info.get("port"))
+            print("SOULCORE_ALREADY_RUNNING " + json.dumps(info, ensure_ascii=False), flush=True)
+            return None
+
+    qq = cfg.get("qq", {})
+    if qq.get("enabled"):
+        if qq.get("transport") == "ws":
+            from .adapters.onebot_ws import OneBotWSAdapter
+            ws = OneBotWSAdapter(engine, qq).start()
+            log.info("QQ 使用 WebSocket（%s），不需要再配 HTTP 上报", qq.get("ws_url"))
+        else:
+            from .adapters.onebot import OneBotAdapter
+            onebot = OneBotAdapter(engine, qq)
+            log.info("QQ(OneBot v11 HTTP) 已启用，上报地址 http://%s:%s/onebot",
+                     scfg.get("host"), scfg.get("port"))
     if cfg.get("bilibili", {}).get("enabled"):
         from .adapters.bilibili import BiliAdapter
         bili = BiliAdapter(engine, cfg["bilibili"])
@@ -138,12 +210,34 @@ def serve(engine, cfg: dict, block: bool = True):
                 log.exception("tick 失败")
     threads.append(threading.Thread(target=ticker, daemon=True, name="ticker"))
 
-    token = os.environ.get("SOULCORE_TOKEN") or scfg.get("token", "")
-    httpd = ThreadingHTTPServer((scfg.get("host", "127.0.0.1"), int(scfg.get("port", 8765))),
-                                make_handler(engine, onebot, token))
+    # 独立运行时也要有 token：否则本机任何程序都能调 /v1/chat。
+    # 由 DSH 拉起的子进程会用环境变量传 token；只有自己常驻启动（有锁）时才随机生成。
+    token = os.environ.get("SOULCORE_TOKEN") or scfg.get("token") or ""
+    if not token and lock_path:
+        token = secrets.token_hex(24)
+    ctl: dict = {}
+    httpd = bind_http_server(scfg.get("host", "127.0.0.1"), int(scfg.get("port", 8765)),
+                             make_handler(engine, onebot, token, ctl))
+
+    def qq_status() -> dict:
+        st = {"enabled": bool(qq.get("enabled")), "transport": qq.get("transport", "http")}
+        if ws is not None:
+            st.update(connected=ws.connected, self_id=ws.onebot.self_id, ws_url=qq.get("ws_url"))
+        elif onebot is not None:
+            st.update(connected=None, self_id=onebot.self_id)
+        return st
+    ctl["qq_status"] = qq_status
+    # 在另一个线程里调 shutdown()：serve_forever 所在线程返回后走下面 finally 的清理（释放锁、关库）
+    ctl["shutdown"] = lambda: threading.Thread(target=httpd.shutdown, daemon=True, name="shutdown").start()
+    port = httpd.server_address[1]
+    if lock is not None:
+        lock.write({"pid": os.getpid(), "port": port, "token": token,
+                    "started": time.time(), "version": version,
+                    "name": engine.name, "data_dir": engine.data_dir})
     # 握手：宿主（DSH 插件）从 stdout 读这一行拿到实际端口
-    print("SOULCORE_READY " + json.dumps({"port": httpd.server_address[1], "pid": os.getpid(),
-                                           "name": engine.name}, ensure_ascii=False), flush=True)
+    print("SOULCORE_READY " + json.dumps({"port": port, "pid": os.getpid(),
+                                           "name": engine.name, "version": version},
+                                          ensure_ascii=False), flush=True)
     if os.environ.get("SOULCORE_STDIN_WATCHDOG") == "1":
         # 宿主进程退出（哪怕是被强杀）时 stdin 管道会关闭 → 跟着退出，避免留下孤儿进程
         def watchdog():
@@ -164,7 +258,9 @@ def serve(engine, cfg: dict, block: bool = True):
     if not block:
         th = threading.Thread(target=httpd.serve_forever, daemon=True)
         th.start()
-        return httpd, onebot, stop
+        httpd.soulcore_lock = lock
+        httpd.soulcore_ws = ws
+        return httpd, onebot or ws, stop
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -174,4 +270,8 @@ def serve(engine, cfg: dict, block: bool = True):
         httpd.server_close()
         if onebot:
             onebot.stop()
+        if ws:
+            ws.stop()
+        if lock is not None:
+            lock.release()
         engine.close()

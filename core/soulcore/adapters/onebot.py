@@ -36,8 +36,10 @@ def _unescape(s: str) -> str:
 
 
 class OneBotAdapter:
-    def __init__(self, engine, cfg: dict):
+    def __init__(self, engine, cfg: dict, api_fn=None):
+        """api_fn：发送消息的通道。None 时走 HTTP（api_base），传函数时走别的传输（例如 WebSocket）。"""
         self.engine, self.cfg = engine, cfg
+        self.api_fn = api_fn
         self.self_id = str(cfg.get("self_id") or "")
         self.groups = {str(g) for g in cfg.get("group_whitelist", [])}
         self.privates = {str(u) for u in cfg.get("private_whitelist", [])}
@@ -90,7 +92,9 @@ class OneBotAdapter:
         sender = p.get("sender", {}) or {}
         uname = sender.get("card") or sender.get("nickname") or uid
         if mtype == "private":
-            if not (self.cfg.get("allow_all_private") or uid in self.privates):
+            # 主人（owner.qq）的私聊总是放行：设置页填了"你的 QQ 号"就够了，不用再加一遍白名单
+            owner = str((getattr(self.engine, "cfg", None) or {}).get("owner", {}).get("qq") or "")
+            if not (self.cfg.get("allow_all_private") or uid in self.privates or (owner and uid == owner)):
                 return None, False
             ev = Event("qq", "private", uid, uid, uname, text, mentions_self=True, ts=p.get("time") or time.time(),
                        event_id=f"qq:{uid}:{p.get('message_id')}",
@@ -141,6 +145,18 @@ class OneBotAdapter:
                                               "message": [{"type": "text", "data": {"text": text}}]})
 
     def _api(self, action: str, body: dict) -> bool:
+        if self.api_fn is not None:
+            try:
+                res = self.api_fn(action, body) or {}
+            except Exception as ex:
+                log.error("调用 OneBot action 失败 %s: %s", action, ex)
+                self.sent_log.append({"action": action, "body": body, "ok": False})
+                return False
+            ok = res.get("status") == "ok" or res.get("retcode") == 0
+            self.sent_log.append({"action": action, "body": body, "ok": ok})
+            if not ok:
+                log.warning("OneBot 返回失败: %s", res)
+            return ok
         url = self.cfg.get("api_base", "http://127.0.0.1:3000").rstrip("/") + "/" + action
         headers = {"Content-Type": "application/json"}
         if self.cfg.get("access_token"):

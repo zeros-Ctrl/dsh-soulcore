@@ -83,12 +83,93 @@ def cmd_chat(args):
         eng.close()
 
 
+def _lock_path(args) -> str:
+    """锁文件放在配置文件旁边（soulcore home），和 data_dir 无关。"""
+    cfg_path = os.path.abspath(args.config)
+    return os.path.join(os.path.dirname(cfg_path), "soulcore.lock")
+
+
+def _probe(info: dict | None, timeout: float = 1.5) -> bool:
+    """锁文件里记的实例是不是真的活着（pid 在 + /v1/health 通）。"""
+    if not info or not info.get("port"):
+        return False
+    try:
+        import urllib.request
+        req = urllib.request.Request(f"http://127.0.0.1:{info['port']}/v1/health",
+                                     headers={"Authorization": f"Bearer {info.get('token', '')}"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def _config_path(args) -> str:
+    """命令行给的配置；没给/不存在时回落到 SOULCORE_HOME（或 ~/.dsh/soulcore）里的 config.json。"""
+    p = os.path.abspath(args.config)
+    if os.path.exists(p):
+        return p
+    env = os.environ.get("SOULCORE_HOME")
+    home = env or os.path.join(os.path.expanduser("~"), ".dsh", "soulcore")
+    alt = os.path.join(home, "config.json")
+    return alt if os.path.exists(alt) else p
+
+
 def cmd_serve(args):
+    from .lockfile import InstanceLock
     from .server import serve
-    eng, cfg = _engine(args)
+    from . import __version__
+    lock_path = _lock_path(args)
+    info = InstanceLock.read(lock_path)
+    if _probe(info):
+        print(f"已经有 soulcore 在运行：pid={info['pid']} port={info['port']}（{info.get('version', '?')}），"
+              f"DSH 会直接接入它，不需要再起一个。")
+        return
+    # 先抢锁再创建 Engine：Engine 初始化会做数据库迁移、人物档案合并，这些写入只能由唯一实例来做
+    lock = InstanceLock(lock_path)
+    if not lock.acquire():
+        info = InstanceLock.read(lock_path) or {}
+        print("SOULCORE_ALREADY_RUNNING " + json.dumps(info, ensure_ascii=False), flush=True)
+        return
+    try:
+        eng, cfg = _engine(args)
+    except BaseException:
+        lock.release()
+        raise
     if args.port is not None:
         cfg["server"]["port"] = args.port
-    serve(eng, cfg)
+    if serve(eng, cfg, lock_path=lock_path, version=__version__, lock=lock) is None:
+        eng.close()
+
+
+def cmd_install_service(args):
+    from .service import install
+    ok, msg = install(_config_path(args))
+    print(("✓ " if ok else "✗ ") + msg)
+    if not ok:
+        sys.exit(1)
+
+
+def cmd_uninstall_service(args):
+    from .service import uninstall
+    ok, msg = uninstall()
+    print(("✓ " if ok else "✗ ") + msg)
+    if not ok:
+        sys.exit(1)
+
+
+def cmd_service_start(args):
+    from .service import start
+    ok, msg = start()
+    print(("✓ " if ok else "✗ ") + (msg or ""))
+    if not ok:
+        sys.exit(1)
+
+
+def cmd_service_status(args):
+    from .service import status
+    ok, msg = status()
+    print(msg if msg else ("运行中" if ok else "未安装"))
+    sys.exit(0 if ok else 1)
 
 
 def cmd_review(args):
@@ -168,6 +249,10 @@ def main(argv=None):
     b.set_defaults(fn=cmd_bili)
     sub.add_parser("state", help="查看当前状态").set_defaults(fn=cmd_state)
     sub.add_parser("demo", help="离线演示：模拟一天的 QQ/B站/项目消息").set_defaults(fn=cmd_demo)
+    sub.add_parser("install-service", help="注册常驻计划任务（登录时自动启动，Windows）").set_defaults(fn=cmd_install_service)
+    sub.add_parser("uninstall-service", help="删除常驻计划任务").set_defaults(fn=cmd_uninstall_service)
+    sub.add_parser("service-start", help="立刻运行常驻计划任务（Windows）").set_defaults(fn=cmd_service_start)
+    sub.add_parser("service-status", help="查看常驻计划任务状态").set_defaults(fn=cmd_service_status)
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S")

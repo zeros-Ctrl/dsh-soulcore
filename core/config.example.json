@@ -21,6 +21,8 @@
 
   "appraisal": { "mode": "heuristic" },
 
+  "owner": { "qq": "你的QQ号", "name": "主人" },
+
   "memory": {
     "extract_every": 6,
     "recent_turns": 12,
@@ -28,6 +30,7 @@
     "cold_threshold": 0.04,
     "consolidate_min": 30,
     "share_projects_in_chat": false,
+    "touch_mode": "recency",
     "tau_hours": { "turn": 72, "fact": 1440, "decision": 8760 }
   },
 
@@ -35,13 +38,18 @@
 
   "server": { "host": "127.0.0.1", "port": 8765, "token": "", "tick_every_min": 15 },
 
+  "service": { "mode": "follow_dsh" },
+
   "qq": {
     "enabled": false,
+    "transport": "ws",
+    "ws_url": "ws://127.0.0.1:3001",
     "api_base": "http://127.0.0.1:3000",
     "access_token": "",
-    "self_id": "机器人QQ号",
+    "self_id": "",
     "group_whitelist": ["群号1"],
     "private_whitelist": ["你的QQ号"],
+    "group_known": [],
     "allow_all_private": false,
     "min_interval_s": 3,
     "max_per_min": 10,

@@ -18,7 +18,7 @@ B站 ── bilibili-api(轮询) ── 人审队列 ───┼─► Event �
 
 ```bash
 python -m soulcore demo                          # 模拟一整天：QQ 私聊/群聊、B站评论、项目讨论、余额变化
-python -m unittest discover -s tests -v          # 13 个测试
+python -m unittest discover -s tests -v          # 35 个测试
 python -m soulcore --mock chat --project 毕设     # 命令行聊天，/help 查看命令（/skip 快进时间、/event 触发情绪、/mem 查记忆）
 ```
 
@@ -51,18 +51,36 @@ JS 示例见 `clients/soulcore-client.js`。如果 harness 只能发消息、不
 
 ## 4. 接 QQ（OneBot v11）
 
-1. 装一个协议端：推荐 LLBot，NapCat 作为备选。**一定要用小号**。
-2. 在协议端里开启 **HTTP 服务**，例如 `127.0.0.1:3000`，设置一个 token。再开启 **HTTP 上报**，地址填 `http://127.0.0.1:8765/onebot`，上报格式选 array。
-3. 在 `config.json` 里设置：
-   - `qq.enabled=true`
-   - 填写 `api_base`、`access_token`、`self_id`
-   - 把允许她说话的群号加进 `group_whitelist`
-4. 运行 `python -m soulcore serve`。
+推荐 **NapCat + 正向 WebSocket**：NapCat 那边只配一项，soulcore 主动连过去，收发同一条连接，断线自动重连。
+
+1. 装 NapCat（Windows 一键包），用**小号**扫码登录。
+2. NapCat WebUI →「网络配置 → 新建 → WebSocket 服务器」：Host `127.0.0.1`、Port `3001`、消息格式 **Array**、Token 随便设一个，启用并保存。
+3. `config.json` 里：
+   ```json
+   "qq": { "enabled": true, "transport": "ws", "ws_url": "ws://127.0.0.1:3001", "access_token": "和 NapCat 一致",
+           "group_whitelist": ["群号"], "private_whitelist": ["你的QQ号"], "group_known": [] },
+   "owner": { "qq": "你的QQ号", "name": "主人" }
+   ```
+4. 启动方式二选一：
+   - 跟随 DSH：什么都不用做，DSH 会拉起后端；
+   - 常驻（推荐，想让 QQ 一直在）：`python -m soulcore -c <config.json> install-service`，之后登录 Windows 就自动在后台起，卸载用 `uninstall-service`，查状态用 `service-status`。
+5. 连上后会自动 `get_login_info` 拿机器人自己的 QQ 号，不用手填 `self_id`。
+
+旧的 **HTTP 上报** 仍然可用：`"transport": "http"` + NapCat 里配 HTTP 服务/上报，地址 `http://127.0.0.1:8765/onebot`。
 
 她的行为规则：
 - 白名单以外的群，消息不看也不存。
 - 白名单群里的消息她都会"看到"并记下来，但只在被 @ 或被叫名字时回复。想让她偶尔主动插话，可以调高 `interject_prob`。
 - 私聊默认只回复 `private_whitelist` 里的人。
+- **主人身份合并**：`owner.qq` 那个号在私聊里和本地 DSH 共用同一份人物档案（`core/people/owner`），并且能召回项目里的决策/摘要；群里和其他人的私聊看不到项目记忆。
+
+### 单实例与"接入已有进程"
+
+后端启动时会在 `~/.dsh/soulcore/soulcore.lock` 写 `{pid, port, token, started, version}` 并加操作系统锁。
+DSH 插件启动时先读这个锁：进程活着、`/v1/health` 能通就直接接入，**不再起第二个进程**；
+抢不到锁的第二个实例会打印信息后退出，不会出现两个进程同时写 `memory.db`。
+
+DSH 退出时只会断开常驻进程，不会杀掉它——这样"她一直在"才成立。常驻模式下改配置需要重启常驻进程才生效（设置页会提示）。
 
 ## 5. 接 B站（评论区 @ / 回复 + 私信）
 
@@ -88,24 +106,48 @@ pip install bilibili-api-python==17.4.2   # 原仓库已经归档，必须锁定
 | 门 | 实现 |
 |---|---|
 | 输入门 | 每条记忆都有重要性分。原始对话按规则打分；每 6 轮由 LLM 提炼一次"事实、偏好、决策、待办"，并给出重要性 |
-| 遗忘门 | `w = 重要性 × e^(-Δt/τ) × (1 + 0.3·ln(1+被检索次数))`。τ 按类型设定：闲聊 3 天，事实 2 个月，决策 1 年。被检索一次就刷新计时，相当于"复习"。权重太低的记忆**转为冷存储，不会删除** |
-| 输出门 | 检索分数 = 相关度 × 权重 × 层级折扣。先搜当前分支，结果不够再逐级回退到父分支、core，最后是全局 |
+| 遗忘门 | `w = 重要性 × e^(-Δt/τ) × (1 + 0.3·ln(1+被检索次数))`。τ 按类型设定：闲聊 3 天，事实 2 个月，决策 1 年。被检索一次就刷新计时，相当于"复习"。权重太低的记忆**转为冷存储，不会删除**。`pinned` 的永久事实（名字/生日/过敏）不衰减 |
+| 输出门 | 检索分数 = 相关度 × 权重 × 层级折扣。先搜当前分支，结果不够再逐级回退到父分支、core，最后是全局；回退时按 `trust` 过滤来源 |
 | 细胞状态 | 某个分支冷掉的原始对话超过 30 条时，压缩成一条摘要，保留指向原文的指针 |
 
-目录树对应分支，SQLite 里存的是权威数据，Markdown 文件是给你看的镜像：
+**信任级别（trust）**：写入时按"说话人 + 场景"定级。
+
+| 来源 | trust |
+|---|---|
+| 本地 DSH（`platform=local`）、主人的 QQ 私聊 | `owner` |
+| 其他私聊（白名单）、`qq.group_known` 里的人 | `known` |
+| 群里的其他人 | `stranger` |
+| B站评论区 | `public` |
+| B站私信 | `known` |
+
+跨分支回退时允许的级别：本地项目/会话只认 `owner`；QQ 私聊、群、B站私信认 `owner` + `known`；B站评论区只认 `public`。本群/本私聊内部的条目不受 trust 限制。合并去重时取两边里更不可信的级别。
+
+**"注入"算不算"用到"**由 `memory.touch_mode` 决定：
+
+| 值 | 注入时 | 主动检索/回复里用到时 | 30 天模拟（seed 42 / 7） |
+|---|---|---|---|
+| `inject` | 刷新计时 + 访问次数 +1 | 同上 | 88.6% / 95.7% |
+| `recency`（默认） | 只刷新计时 | 刷新计时 + 访问次数 +1 | 88.6% / 94.3% |
+| `used` | 不刷新 | 刷新计时 + 访问次数 +1 | 90.0%（只跑了 seed 42） |
+
+同一随机种子下 `inject` 与 `recency` 最多差 1 题；不固定种子时指标本身在 88.6%–95.7% 之间波动。默认 `recency`：保留复习效果，但不再把"被注入"折算成重要性。
+
+目录树对应分支，SQLite 里存的是权威数据，Markdown 文件是给你看的双向镜像（直接在文件里改/删/加，之后会自动同步回数据库）：
 
 ```
 data/memory/
   chat/qq/private/<QQ号>/   chat/qq/group/<群号>/   chat/bilibili/dm/<UID>/   chat/bilibili/comment/<BV号>/
   project/<项目名>/decisions.md
-  core/people/<平台>/<uid>/notes.md     core/self/
+  core/people/owner/notes.md     core/people/<平台>/<uid>/notes.md     core/self/
 ```
 
 隐私规则（测试里有覆盖）：
 - 原始聊天记录只在本会话内可见，跨会话只会召回提炼过的条目。
 - 别人的私聊和人物档案永远查不到。
-- 项目记忆默认不进 QQ 和 B站。
+- 项目记忆默认不进 QQ 和 B站；**主人的 QQ 私聊**例外。
 - B站评论区是公开场景，看不到任何其他聊天分支。
+- 群聊/评论区提炼出的条目不会出现在本地项目的上下文里（trust 过滤）；主人在群里说的话除外。
+- 在 Markdown 里删掉的条目会留墓碑，自动提炼不会把它写回来（`remember` 工具等主动写入不受限）。
 
 ## 7. 情绪（PID 设定点模型）
 
@@ -130,5 +172,7 @@ data/memory/
 
 - 关键词判断事件比较粗糙。有预算的话把 `appraisal.mode` 改成 `llm`。
 - 检索用的是二元组加 FTS5，没有语义向量，"同义不同词"的情况召回不到。后续可以加 embedding。
-- 手动修改 Markdown 镜像不会同步回数据库。
+- 知识更新还没做：用户先说"喜欢深色"、后说"改用浅色"，两条都会留着（`invalid_at` 字段已预留）。
+- `trust` 按说话人定级，代价是：群里她自己的承诺（`core/self`）在本地项目里召回不到；想放宽需要单独设计。
+- 主动聊天（她自己找你）还没做。
 - B站接口没有在真实账号上测过，只用模拟接口测试了流程。第一次请用 `bili --once` 配合人审小心试。

@@ -49,7 +49,7 @@ dsh plugin --profile desktop add "link:C:\Users\<你>\.dsh\plugins\dsh-soulcore"
   data/emotion.json    情绪状态（重启后接着上次的心情）
   data/memory/         Markdown 镜像，按目录树归档，可以直接打开看
     project/<工作目录名>/decisions.md
-    core/people/local/owner/notes.md
+    core/people/owner/notes.md
     chat/qq/group/<群号>/...      （开启 QQ 接入后才有）
 ```
 
@@ -58,9 +58,21 @@ dsh plugin --profile desktop add "link:C:\Users\<你>\.dsh\plugins\dsh-soulcore"
 ## 记忆是怎么工作的（借鉴 LSTM 的门控）
 
 - **输入门**：每条记忆都有重要性分。寒暄打低分，"记住……"、决策、偏好打高分。
-- **遗忘门**：权重 `w = 重要性 × e^(-Δt/τ) × (1 + 0.3·ln(1+被检索次数))`。τ 按类型设定：闲聊 3 天、事实 2 个月、决策 1 年。被想起一次就重新计时。太弱的记忆转为冷存储，不删除。
-- **输出门**：先搜当前项目，不够再逐级回退到父级、core，最后是全局。
+- **遗忘门**：权重 `w = 重要性 × e^(-Δt/τ) × (1 + 0.3·ln(1+被检索次数))`。τ 按类型设定：闲聊 3 天、事实 2 个月、决策 1 年。被想起一次就重新计时。太弱的记忆转为冷存储，不删除。名字、生日、过敏这类**永久事实**（`pinned`）不衰减。
+- **输出门**：先搜当前项目，不够再逐级回退到父级、core，最后是全局。跨分支回退时还会按**可信度**（trust）过滤，见下面"隐私规则"。
 - **细胞状态**：冷掉的原始对话攒够 30 条，就合并成一条摘要。
+
+**"被注入"算不算"被想起"？** 由 `memory.touch_mode` 决定：
+
+| 值 | 注入时 | 主动检索/回复里用到时 | 30 天模拟（seed 42 / 7） |
+|---|---|---|---|
+| `inject` | 刷新计时，访问次数 +1（v0.2 行为） | 同上 | 88.6% / 95.7% |
+| `recency`（默认） | 只刷新"多久没想起" | 刷新计时，访问次数 +1 | 88.6% / 94.3% |
+| `used` | 完全不刷新 | 刷新计时，访问次数 +1 | 90.0%（只跑了 seed 42） |
+
+同一随机种子下，`inject` 与 `recency` 最多差 1 题（70 题里），v0.2 与 v0.3 的 `inject` 完全相同。不固定种子时这一指标本身会在 88.6%–95.7% 之间波动——别拿单次运行比较版本。
+
+默认取 `recency`：它保留了"复习刷新计时"的效果，又去掉了"越被注入、重要性越高"的正反馈。`used` 最严格，但离线模拟里 MockLLM 的回复总会复述一条记忆，等于一直在"用到"，所以它在真实对话里的代价还没测准。
 
 隐私规则（有测试覆盖）：
 
@@ -68,6 +80,8 @@ dsh plugin --profile desktop add "link:C:\Users\<你>\.dsh\plugins\dsh-soulcore"
 - 别人的私聊和人物档案永远查不到。
 - 项目记忆默认不会进 QQ 和 B站。
 - B站评论区是公开场景，看不到任何其他聊天分支。
+- 每条记忆带来源可信度：本地 DSH、主人的 QQ 私聊是 `owner`；白名单私聊、群里的熟人是 `known`；群里的陌生人是 `stranger`；B站评论区是 `public`。本地项目只召回 `owner` 的记忆，所以**群里陌生人说的"记住……"进不了编程 agent 的上下文**。主人在群里说的话仍算 `owner`。
+- 用户在 Markdown 里删掉的条目会留下墓碑，自动提炼不会把它写回来。
 
 ## 情绪模型
 
@@ -82,16 +96,26 @@ dsh plugin --profile desktop add "link:C:\Users\<你>\.dsh\plugins\dsh-soulcore"
 
 ## 可选：接入 QQ / B站
 
-后端同时也是一个 OneBot v11 上报接收端，以及 B站轮询器（带人工审核队列，遇到风控码会立即暂停）。在 `~/.dsh/soulcore/config.json` 里打开 `qq.enabled` 或 `bilibili.enabled`，并填写对应字段即可。
+QQ 用 **NapCat + 正向 WebSocket**：soulcore 主动连 NapCat，收发同一条连接，断线自动重连，也不用给 soulcore 固定端口。**全部在设置页里完成，不用改配置文件：**
 
-注意：在这两种场景下，回复由后端自己调用 DeepSeek 生成，所以**必须填写 API Key**。
+1. 装 NapCat，用**小号**扫码登录。
+2. 打开 NapCat WebUI（默认 `http://127.0.0.1:6099/webui`）→「网络配置」→ 新建「WebSocket 服务器」：Host `127.0.0.1`，端口 `3001`，消息格式 Array，设一个 Token，保存并启用。
+3. DSH「设置 → 人格与记忆 → QQ 接入」：填**你的 QQ 号**、地址 `ws://127.0.0.1:3001` 和 Token，点「测试连接」，看到"连上了：机器人 QQ xxx"后打开「启用 QQ」，保存设置。
+
+- **你的 QQ 号**：她会把这个号认成你，和 DSH 里的你共用 `core/people/owner` 这一份档案，私聊自动放行，QQ 私聊里也能聊起项目上的事；群里看不到项目记忆。
+- **常驻运行**：设置页点「安装常驻（开机自动启动）」，会注册一个登录 Windows 时自动启动的计划任务。这样 DSH 关了她也在线，DSH 打开时直接连上她，不会多开。已接入常驻进程时保存设置，会自动重启常驻进程让新配置生效。命令行等价操作：`python -m soulcore -c <config.json> install-service` / `uninstall-service` / `service-status`。
+- **单实例**：后端启动时先加锁再初始化，DSH 先读锁，能接入就不再起第二个进程。
+
+旧的 HTTP 上报（`transport: "http"`）仍然保留，只能通过编辑 `config.json` 使用。后端同时也是一个 B站轮询器（带人工审核队列，遇到风控码会立即暂停），在 `config.json` 里打开 `bilibili.enabled` 即可。
+
+注意：QQ/B站 场景下回复由后端自己调用 DeepSeek 生成，所以**必须填写 API Key**。
 
 详细说明见 [`docs/core.md`](docs/core.md)。请使用小号，在简介里声明是 AI，并遵守平台规则。
 
 ## 开发
 
 ```bash
-npm test                       # 9 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 13 个 Python 测试
+npm test                       # 13 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 54 个 Python 测试
 cd core && python -m soulcore --mock demo    # 离线演示：模拟一整天
 cd core && python -m soulcore --mock chat    # 命令行里直接和她聊（/skip 快进时间，/event 触发事件）
 ```
