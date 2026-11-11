@@ -29,7 +29,10 @@ DEFAULTS = {
            "sticker": {"enabled": True, "dir": "", "max_images": 1},
            "bili": {"enabled": False, "tools_path": "", "node": "", "every_min": 180,
                     "max_candidates": 3, "timeout_s": 45, "chat_trigger": True,
-                    "chat_min_gap_s": 600}},
+                    "chat_min_gap_s": 600,
+                    # 聊天里搜视频 / 读字幕：每小时上限（防止账号被风控）和超时
+                    "search_per_hour": 10, "video_per_hour": 5,
+                    "search_timeout_s": 20, "subtitle_timeout_s": 45}},
     "bilibili": {"enabled": False, "credential": {"sessdata": "", "bili_jct": "", "buvid3": "", "dedeuserid": ""},
                  "poll_interval_s": 90, "reply_at": True, "reply_replies": True, "dm_whitelist": [],
                  "auto_send": False, "comment_min_interval_s": 15, "comment_max_per_hour": 20,

@@ -76,7 +76,8 @@ class TestBiliPrompt(unittest.TestCase):
             eng = self._eng(clk)
             ctx = ask(eng, "在吗")                         # 不是触发词也要有能力说明
             self.assertIn("你会刷B站", ctx["system"])
-            self.assertIn("只看得到视频标题", ctx["system"])
+            self.assertIn("看不到画面", ctx["system"])
+            self.assertIn("按关键词搜视频", ctx["system"])
             local = eng.prepare(Event("local", "project", "p", "owner", "主人", "B站视频怎么爬"))
             self.assertNotIn("你会刷B站", local["system"], "本地 DSH 编程会话不需要这段")
             eng.close()

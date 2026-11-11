@@ -26,9 +26,10 @@ log = logging.getLogger("soulcore")
 
 # QQ 开着刷 B站 时常驻进提示词：说清楚她能做什么、看得到什么
 BILI_ABILITY = ("## 你会刷B站\n"
-                "你可以自己去刷B站首页推荐，后台也会时不时自己刷一下。"
-                "你只看得到视频标题和UP主，看不到画面、声音和评论区。\n"
-                "被问到能不能刷B站时照实说：能刷，但只看得到标题；别说自己刷不了，也别假装看过视频内容。"
+                "你可以自己刷B站首页推荐，后台也会时不时自己刷一下；私聊里还能按关键词搜视频，"
+                "也能去读某个视频的字幕了解它讲了什么（要等一会儿，看完再告诉对方）。\n"
+                "你看不到画面、听不到声音；没有字幕的视频就只知道标题和简介。"
+                "被问到能做什么时照实说，别说自己刷不了，也别假装看过你没读过的视频。"
                 "之前说过刷不了的话以这里为准。")
 
 
@@ -64,6 +65,10 @@ class Engine:
         scfg = (cfg.get("qq") or {}).get("sticker") or {}
         self.stickers = StickerLib(scfg.get("dir"), enabled=bool(scfg.get("enabled", True)))
         self._bili_busy = threading.Event()
+        self.qq_sender = None             # QQ 发送通道（serve() 里挂上）：看完视频后主动发消息用
+        self._public_ctx: set[str] = set()   # 这一轮用了搜索结果/字幕的会话：回复按 known 存
+        from .bili_chat import BiliChat
+        self.bili_chat = BiliChat(self)
         self.lock = threading.RLock()
         self.bg = ThreadPoolExecutor(max_workers=1, thread_name_prefix="soulcore-bg")
         self._emo_file = os.path.join(self.data_dir, "emotion.json")
@@ -231,7 +236,11 @@ class Engine:
             # 能力说明常驻：不然她只在触发时看到一段素材，不知道自己"会刷"，
             # 又会顺着历史里自己说过的"刷不了"继续否认
             system += "\n\n" + BILI_ABILITY
-            if bcfg.get("chat_trigger", True) and self._wants_bili(ev.text):
+            internal = bool((ev.raw or {}).get("internal"))     # 看完视频后的那条消息：别再触发搜/看
+            extra = "" if internal else self.bili_chat.augment(ev)
+            if extra:
+                system += "\n\n" + extra
+            elif not internal and bcfg.get("chat_trigger", True) and self._wants_bili(ev.text):
                 got = self._bili_cached()
                 if not got and self._bili_sync_allowed(bcfg):
                     # 还没有缓存：同步刷一次。失败也记时间，chat_min_gap_s 内不再同步重试，
@@ -262,12 +271,20 @@ class Engine:
                                                       "score": round(i.score, 4)} for i in mems]}
 
     # ------------------------------------------------------------------ 写回
-    def commit_reply(self, ev: Event, reply: str) -> None:
+    def commit_reply(self, ev: Event, reply: str, trust: str | None = None) -> None:
         if not reply:
             return
+        t = self._trust(ev)
+        if trust:
+            t = stricter(t, trust)
+        if ev.path in self._public_ctx:
+            # 这一轮她用了搜索结果/字幕这类公开内容：回复（以及从它提炼的记忆）按 known 存，
+            # 否则视频里藏的"指令"能借她的嘴变成 owner 记忆，进入本地 DSH 编程会话
+            self._public_ctx.discard(ev.path)
+            t = stricter(t, "known")
         with self.lock:
             self.store.write(ev.path, "turn", reply, 0.15, role="assistant", speaker=self.name,
-                             trust=self._trust(ev))
+                             trust=t)
             if self.mcfg.get("touch_mode", "recency") in ("recency", "used"):
                 items, ts = self._injected.pop(ev.path, ([], 0.0))
                 # 超过 15 分钟才到的回复不算这一轮，别把旧注入当"用到了"
@@ -275,6 +292,7 @@ class Engine:
                     used = [it.id for it in items if used_in_reply(it.content, reply)]
                     if used:
                         self.store.touch(used)
+        self.bili_chat.on_reply(ev)
         self._maybe_extract(ev)
 
     def _maybe_extract(self, ev: Event, force: bool = False) -> None:
@@ -480,6 +498,7 @@ class Engine:
             log.warning("刷B站失败：%s", ex)
         if hit.get("titles"):
             self._bili_remember(hit["titles"])
+            self.bili_chat.set_recent(hit.get("items") or [], "feed")
         return hit
 
     def _bili_worker(self, bcfg: dict) -> None:

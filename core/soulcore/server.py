@@ -246,6 +246,7 @@ def serve(engine, cfg: dict, block: bool = True, lock_path: str | None = None,
     qq_adapter = ws.onebot if ws is not None else onebot
     initiative = Initiative(engine, sender=qq_adapter.send if qq_adapter is not None else None)
     engine.initiative = initiative
+    engine.qq_sender = qq_adapter.send if qq_adapter is not None else None   # 看完视频后主动发消息
     ctl["initiative"] = initiative
 
     def initiative_loop():

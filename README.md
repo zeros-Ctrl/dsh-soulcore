@@ -108,6 +108,22 @@ QQ 用 **NapCat + 正向 WebSocket**：soulcore 主动连 NapCat，收发同一�
 
 旧的 HTTP 上报（`transport: "http"`）仍然保留，只能通过编辑 `config.json` 使用。后端同时也是一个 B站轮询器（带人工审核队列，遇到风控码会立即暂停），在 `config.json` 里打开 `bilibili.enabled` 即可。
 
+### 在 QQ 里让她刷 B站
+
+需要装好 [dsh-bili-whale](../dsh-bili-whale)，并在 `config.json` 里打开 `qq.bili.enabled`。只用它的只读命令，不评论、不点赞、不收藏、不私信。
+
+| 你说 | 她会 |
+|---|---|
+| "最近刷到啥视频了" | 说出最近在首页刷到的视频（后台每 3 小时自己刷一次） |
+| "帮我在b站搜一下猫咪视频" | 当场去搜，挑几个结果说说（几秒钟） |
+| "看看第二个讲了啥" / "帮我看看《某视频》" | 先回一句"等我看看"，读完字幕后再主动发一条讲内容 |
+
+- **只在私聊里，只对你和白名单里的人。** 群里不帮人搜、不帮人看，免得谁都能用你的 B站账号发请求。
+- **每小时有上限**：默认搜 10 次、看 5 个视频（`qq.bili.search_per_hour` / `video_per_hour`），避免账号被风控。
+- **读字幕需要 B站登录有效。** 登录过期时，字幕接口会把所有视频都返回成"没有字幕"，她会照实说"登录过期了"。换 cookie：更新 `~/.bili-ai/credentials.json`，可以用 `node bili.mjs session` 检查。
+- **她看不到画面、听不到声音。** 没有字幕的视频只知道标题和简介。
+- **搜索结果和字幕都是公开内容**，只在当次聊天里用，不会进入你在 DSH 里的编程会话。
+
 注意：QQ/B站 场景下回复由后端自己调用 DeepSeek 生成，所以**必须填写 API Key**。
 
 详细说明见 [`docs/core.md`](docs/core.md)。请使用小号，在简介里声明是 AI，并遵守平台规则。
@@ -147,7 +163,7 @@ QQ 用 **NapCat + 正向 WebSocket**：soulcore 主动连 NapCat，收发同一�
 ## 开发
 
 ```bash
-npm test                       # 14 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 94 个 Python 测试
+npm test                       # 14 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 114 个 Python 测试
 cd core && python -m soulcore --mock demo    # 离线演示：模拟一整天
 cd core && python -m soulcore --mock chat    # 命令行里直接和她聊（/skip 快进时间，/event 触发事件）
 ```
