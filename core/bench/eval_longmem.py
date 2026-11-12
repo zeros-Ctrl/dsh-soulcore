@@ -75,6 +75,22 @@ LR = [
     ("robot", "记一下，雷达型号是思岚 A2", "雷达用的哪个型号", "A2"),
 ]
 
+# 热干扰下的冷回想（v0.8.1）：第 1 天说，之后 190 天再没人提，192–197 天说 6 句同关键词的热条目，
+# 第 200 天问。为什么要隔这么久：这条 fact 的 importance 0.9 / tau 60 天，大约第 187 天转冷；
+# 那之前只要有一轮检索到它，它就会被"复习"、一直热着，就测不到冷存储了。
+LR_HOT = {
+    "proj": "毕设",
+    "fact": "记一下，前年考的那本驾照类型是 C1，有效期到 2028 年",
+    "q": "我的驾照是什么类型",
+    "gold": "C1",
+    "noise": [(192, "驾照好像快到期了"),
+              (193, "今天去拍驾照照片，排队排了一小时"),
+              (194, "驾照换证要体检，记得空腹"),
+              (195, "体检报告还没去拿"),
+              (196, "驾照的事下周再说吧"),
+              (197, "体检约在周五上午")],
+}
+
 # 对照组：第 170–185 天之间说，第 200 天问（保证普通召回没有退步）
 CTRL = [
     (170, "blog", "记一下，博客域名是 zeros.top", "博客域名是什么", "zeros.top"),
@@ -133,6 +149,10 @@ def main() -> dict:
         add(day, "robot", text, 10.5)                    # 10:30 说的
     for proj, text, _q, _gold in LR:
         add(1, proj, text)
+    # 热干扰：第 1 天说事实，150–190 天说 6 句同关键词但不含答案的话
+    add(1, LR_HOT["proj"], LR_HOT["fact"])
+    for day, text in LR_HOT["noise"]:
+        add(day, LR_HOT["proj"], text)
     for day, proj, text, _q, _gold in CTRL:
         add(day, proj, text)
     add(50, "毕设", "记住我的生日是 3 月 14 日")
@@ -217,6 +237,12 @@ def main() -> dict:
         lr_ok += ok
         details.append({"cat": "LR", "q": q, "ok": ok, "text": text[:300]})
 
+    # LR：热干扰下的冷回想
+    text = probe("LR", LR_HOT["proj"], LR_HOT["q"])
+    ok = visible(text, LR_HOT["gold"])
+    lr_ok += ok
+    details.append({"cat": "LR", "q": LR_HOT["q"] + "（热干扰）", "ok": ok, "text": text[:300]})
+
     # CTRL
     ctrl_ok = 0
     for _day, proj, _say, q, gold in CTRL:
@@ -250,7 +276,7 @@ def main() -> dict:
         "ku_new_visible": round(ku_new / len(KU), 4),
         "ku_stale_unlabeled": round(ku_stale / len(KU), 4),
         "tr_ok": round(tr_ok / len(tr_probes), 4),
-        "lr_ok": round(lr_ok / len(LR), 4),
+        "lr_ok": round(lr_ok / (len(LR) + 1), 4),
         "ctrl_ok": round(ctrl_ok / len(CTRL), 4),
         "privacy_leaks": leaks,
         "extract_calls": llm.calls, "extract_in_chars": llm.in_chars, "llm_calls_all": llm.calls_all,
