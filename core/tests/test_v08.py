@@ -138,13 +138,15 @@ class TestSupersede(Base):
         b = s.write("project/p", "fact", "前端用 React 写页面", 0.8, reconcile=False)
         self.assertTrue(s.supersede(a, b))
         md = os.path.join(self.tmp, "memory", "project", "p", "notes.md")
-        self.assertIn("superseded_by=", open(md, encoding="utf-8").read())
+        with open(md, encoding="utf-8") as f:
+            self.assertIn("superseded_by=", f.read())
         st = s.sync_markdown(force=True)
         self.assertEqual(st["deleted"], 0)
         row = s.db.execute("SELECT content, status FROM items WHERE id=?", (a,)).fetchone()
         self.assertEqual(row["content"], "数据库用 MySQL")
         self.assertNotEqual(row["status"], "deleted")
-        self.assertIn("superseded_by=", open(md, encoding="utf-8").read())
+        with open(md, encoding="utf-8") as f:
+            self.assertIn("superseded_by=", f.read())
 
     def test_old_db_migration(self):
         db = sqlite3.connect(os.path.join(self.tmp, "memory.db"))
@@ -194,6 +196,9 @@ class TestConflicts(Base):
         ("小车主控板是 RDK X5", "小车 IMU 是 BMI088"),
         ("以后每次提交前提醒我跑测试", "记住论文图表用 matplotlib 画"),
         ("我在读大四", "我室友在读大三"),
+        # 复审 S3：否定对象/主语不对，不能算更新
+        ("我喜欢喝咖啡", "我不再喜欢熬夜了"),
+        ("我在读大四", "我弟弟现在大一了"),
     ]
 
     def test_find_superseded_positive(self):
@@ -238,14 +243,43 @@ class TestConflicts(Base):
         self.assertEqual(s.db.execute("SELECT content FROM items WHERE id=?", (a,)).fetchone()[0],
                          "部署用 Docker Compose 吧")
 
-    def test_derived_summary_invalidated(self):
+    def test_derived_summary_marked_stale_not_hidden(self):
+        """复审 S2：摘要里混着旧说法时只挂 stale_note，整条摘要仍然有效（别把别的内容一起藏了）"""
+        from soulcore.persona import _mem_line
         s = MemoryStore(self.tmp, clock=self.clock)
         a = s.write("project/blog", "fact", "博客部署在香橙派5上，用 Docker 跑", 0.9)
-        sid = s.write("project/blog", "summary", "主人: 博客部署在香橙派5上，用 Docker 跑；主人: 嗯嗯", 0.6,
-                      dedup=False)
+        sid = s.write("project/blog", "summary",
+                      "主人: 博客部署在香橙派5上，用 Docker 跑；主人: 注册上限每天 20 个；主人: 评论要审核",
+                      0.9, dedup=False)
         b = s.write("project/blog", "fact", "博客已经迁到阿里云服务器上了", 0.9, reconcile=False)
         self.assertTrue(s.supersede(a, b))
-        self.assertIsNotNone(s.db.execute("SELECT invalid_at FROM items WHERE id=?", (sid,)).fetchone()[0])
+        row = s.db.execute("SELECT invalid_at, stale_note FROM items WHERE id=?", (sid,)).fetchone()
+        self.assertIsNone(row["invalid_at"])                      # 摘要没被整条藏掉
+        self.assertIn("已过时", row["stale_note"])
+        hits = s.search("注册上限多少", "project/blog")
+        self.assertIn(sid, [x.id for x in hits])                   # 其他信息还能召回
+        item = [x for x in hits if x.id == sid][0]
+        line = _mem_line(item, self.clock())
+        self.assertIn("已过时", line)                               # 旧说法带标注，不冒充现状
+        self.assertIn("香橙派", line)
+
+    def test_stale_summary_not_recalled_as_current_deploy(self):
+        """问"现在部署在哪"时，旧说法只能以"注意：…已过时"的形式出现"""
+        eng, _ = make_engine(self.tmp, self.clock)
+        a = eng.store.write("project/blog", "fact", "博客部署在香橙派5上，用 Docker 跑", 0.9)
+        sid = eng.store.write("project/blog", "summary",
+                              "主人: 博客部署在香橙派5上，用 Docker 跑；主人: 注册上限每天 20 个", 0.9,
+                              dedup=False)
+        b = eng.store.write("project/blog", "fact", "博客已经迁到阿里云服务器上了", 0.9, reconcile=False)
+        eng.store.supersede(a, b)
+        text = eng.context_block(Event("local", "project", "blog", "owner", "主人", "博客现在部署在哪",
+                                       mentions_self=True, ts=self.clock()))["text"]
+        self.assertIn("阿里云", text)
+        for ln in text.splitlines():
+            if "香橙派" in ln:
+                self.assertIn("已过时", ln)
+        self.assertTrue(sid)
+        eng.close()
 
     def test_end_to_end_update(self):
         eng, _ = make_engine(self.tmp, self.clock)
@@ -418,6 +452,21 @@ class TestTimeRetrieval(Base):
         self.assertIn("Svelte", mem[0])
         eng.close()
 
+    def test_yesterday_survives_recent_turns(self):
+        """复审回归：昨天的原话还在最近几轮里时，按时间直取也必须触发（否则答案只存在于被过滤的 turn 里）"""
+        eng, _ = make_engine(self.tmp, self.clock)
+        base = self.clock()
+        eng.store.write("project/web", "decision", "决定把轮询间隔改成 30 秒", 0.8,
+                        valid_from=base - 86400 + 3600)
+        for i in range(6):
+            eng.store.write("project/web", "turn", f"随便聊聊第 {i} 句，昨天说的那个",
+                            0.4, ts=base - 86400 + 7200 + i * 60)
+        ev = Event("local", "project", "web", "owner", "主人", "昨天我们决定了什么",
+                   mentions_self=True, ts=base)
+        text = eng.context_block(ev)["text"]
+        self.assertIn("30 秒", text)
+        eng.close()
+
     def test_window_privacy(self):
         eng, _ = make_engine(self.tmp, self.clock)
         self.clock.t -= 86400
@@ -455,6 +504,35 @@ class TestColdRecall(Base):
         self.assertEqual(eng.store.db.execute("SELECT status FROM items WHERE id=?", (i,)).fetchone()[0], "cold")
         eng.close()
 
+    def test_cold_recall_with_hot_distractors(self):
+        """复审 F1：热条目一多，冷条目就永远进不了前几名——冷回想必须只搜冷的，并按 rel 排"""
+        eng, _ = make_engine(self.tmp, self.clock)
+        i = eng.store.write("project/robot", "fact", "小车的 IMU 是 BMI088，挂在 I2C 上", 0.9)
+        self.clock.skip(24 * 220)
+        eng.store.maintain()
+        self.assertEqual(eng.store.db.execute("SELECT status FROM items WHERE id=?", (i,)).fetchone()[0], "cold")
+        # 10 条同样带"小车 / IMU / 型号 / 上"的热干扰条目
+        hot = []
+        for k in range(10):
+            hot.append(eng.store.write("project/robot", "fact",
+                                       f"小车第 {k} 次调试记录：IMU 数据偶发抖动，串口上看到丢包", 0.9,
+                                       reconcile=False))
+        ev = Event("local", "project", "robot", "owner", "主人", "小车的 IMU 是什么型号", mentions_self=True,
+                   ts=self.clock())
+        text = eng.context_block(ev)["text"]
+        self.assertIn("BMI088", text)
+        self.assertEqual(eng.store.db.execute("SELECT status FROM items WHERE id=?", (i,)).fetchone()[0], "hot")
+        # 只有被注入的冷条目才会被 touch：另外造一条冷条目，确认它保持 cold
+        other = eng.store.write("project/robot", "fact", "小车的雷达支架是铝的", 0.9, reconcile=False)
+        eng.store.db.execute("UPDATE items SET status='cold' WHERE id=?", (other,))
+        eng.store.db.commit()
+        eng.context_block(Event("local", "project", "robot", "owner", "主人", "小车的 IMU 是什么型号",
+                                mentions_self=True, ts=self.clock()))
+        self.assertEqual(eng.store.db.execute("SELECT status FROM items WHERE id=?", (other,)).fetchone()[0],
+                         "cold")
+        self.assertTrue(hot)
+        eng.close()
+
 
 # ====================================================================== T6/T7 降本与门控
 class TestCompact(Base):
@@ -476,10 +554,11 @@ class TestCompact(Base):
         self.assertIn("…", out)
 
     def test_is_phatic(self):
-        for t in ("嗯嗯", "好的", "哈哈", "继续", "ok", "在吗", "谢谢", "晚安!"):
+        for t in ("嗯嗯", "好的", "哈哈", "继续", "ok", "在吗", "谢谢", "晚安!", "好的谢谢", "嗯嗯继续", "ok好的"):
             with self.subTest(t=t):
                 self.assertTrue(is_phatic(t))
-        for t in ("昨天我们决定了什么", "记得我生日吗", "帮我改一下这个函数", "B站有什么好看的"):
+        for t in ("昨天我们决定了什么", "记得我生日吗", "帮我改一下这个函数", "B站有什么好看的",
+                  "好的我试试", "谢谢你的建议"):
             with self.subTest(t=t):
                 self.assertFalse(is_phatic(t))
 
@@ -490,6 +569,10 @@ class TestCompact(Base):
 
         self.assertFalse(worth_extracting([T(t) for t in
                                            ("嗯嗯", "好的", "这个报错怎么看", "帮我改一下这个函数")]))
+        for text in ("我女朋友叫小雨", "我在深圳", "我换工作了", "我下周去日本", "我妈住院了",
+                     "以后用中文回复我", "我有点感冒", "论文被拒了"):
+            with self.subTest(text=text):
+                self.assertTrue(worth_extracting([T(text)]))
         self.assertTrue(worth_extracting([T("记一下，我住在北京")]))
         self.assertTrue(worth_extracting([T("我最近在学日语，每天背 50 个单词")]))
 
@@ -576,6 +659,18 @@ class TestPersona(Base):
         self.assertEqual(detect_slips("1. 改这里\n2. 再改那\n3. 最后跑测试", "local"), [])
         self.assertTrue(detect_slips("1. 改这里\n2. 再改那\n3. 最后跑测试", "qq"))
 
+    def test_context_lines_keep_time(self):
+        """复审 S1：注入行要带"多久以前"，并且按 valid_from 算，不要出现 `·]` 这种多余的点"""
+        eng, _ = make_engine(self.tmp, self.clock)
+        eng.store.write("project/p", "fact", "数据库决定用 SQLite", 0.9, valid_from=self.clock() - 3 * 86400)
+        ev = Event("local", "project", "p", "owner", "主人", "我们的数据库用什么", mentions_self=True,
+                   ts=self.clock())
+        text = eng.context_block(ev)["text"]
+        line = [ln for ln in text.splitlines() if "SQLite" in ln]
+        self.assertTrue(line)
+        self.assertIn("3天前", line[0])
+        self.assertNotIn("·]", line[0])
+        eng.close()
     def test_stranger_slips_dropped(self):
         llm = RecordingLLM(reply={"memories": [], "persona_slips": ["别用敬语"]})
         eng, _ = make_engine(self.tmp, self.clock, llm=llm, owner={"qq": "10001"})
