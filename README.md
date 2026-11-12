@@ -187,7 +187,7 @@ QQ 用 **NapCat + 正向 WebSocket**：soulcore 主动连 NapCat，收发同一�
 ## 开发
 
 ```bash
-npm test                       # 14 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 168 个 Python 测试
+npm test                       # 14 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 169 个 Python 测试
 cd core && python -m unittest discover -s tests   # 只跑 Python 测试
 cd core && python -I bench/eval_longmem.py core ../docs/benchmark/longmem_v08.json   # 长记忆评测
 cd core && python -m soulcore --mock demo    # 离线演示：模拟一整天
