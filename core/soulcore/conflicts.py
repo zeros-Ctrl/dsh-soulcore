@@ -37,9 +37,12 @@ SLOTS = [
 
 # 这些槽位本身只能有一个当前值：不需要变更词也算"变了"
 _SINGLE_VALUE = {"住址", "年级", "导师", "工作", "专业", "部署", "频率时间"}
-# 个人属性：新句里出现了别人（室友/同学/他…）时不要往主人身上套
+# 个人属性：只看"我"的属性，句子里说到别人（弟弟/室友/他…）就不要往主人身上套
 _PERSONAL = {"住址", "年级", "工作", "专业", "喜好"}
-_OTHER_PERSON = re.compile(r"室友|同学|同事|朋友|别人|人家|老妈|我妈|我爸|他|她|老王|小李|群里|老师|导师")
+# 句子里"人"的指代：值前面最近的那个决定了这句话在说谁
+_PERSON_REF = re.compile(r"我|你|他|她|弟弟|妹妹|哥哥|姐姐|爸|妈|儿子|女儿|表[哥姐弟妹]|堂[哥姐弟妹]|"
+                         r"男朋友|女朋友|对象|老婆|老公|同学|室友|同事|朋友|爷爷|奶奶|姥姥|姥爷")
+_NEG_BEFORE = re.compile(r"不|别|没")
 
 _LIKE = re.compile(r"(?:喜欢|爱)(?:喝|吃|玩|看|听|用)?\s*(?P<v>[一-鿿A-Za-z]{1,6})")
 _NEGATED = re.compile(r"戒了|戒掉|不(?:再|喜欢)?(?:喝|吃|玩|看|听|用)?|讨厌|受不了")
@@ -74,12 +77,12 @@ def _subj_match(a: str, b: str) -> bool:
     return jaccard(a, b) >= 0.5
 
 
-def _about_other(text: str) -> bool:
-    return bool(_OTHER_PERSON.search(text))
+def _slots(text: str) -> list[tuple[str, str, str, int]]:
+    """返回 (槽位名, 主语, 值, 值在句中的位置)。
 
-
-def _slots(text: str) -> list[tuple[str, str, str]]:
-    out: list[tuple[str, str, str]] = []
+    位置用来判断"这句话说的是不是我"：主语出现在值前面，且不是"我"，就不是我自己的属性。
+    """
+    out: list[tuple[str, str, str, int]] = []
     for name, pat in SLOTS:
         for m in pat.finditer(text):
             gd = m.groupdict()
@@ -89,7 +92,14 @@ def _slots(text: str) -> list[tuple[str, str, str]]:
             # "我最喜欢的电影是…"会被"喜好"槽位抓成"的电影是星际"这种短语：不是值，丢掉
             if name == "喜好" and ("的" in v or "是" in v or len(v) > 4):
                 continue
-            out.append((name, _norm(gd.get("s")), v))
+            try:
+                vpos = m.start("v")
+            except IndexError:
+                vpos = m.start()
+            # "我不再喜欢熬夜"里的"熬夜"是被否定的对象，不是新的喜好
+            if name == "喜好" and _NEG_BEFORE.search(text[max(0, vpos - 4):vpos]):
+                continue
+            out.append((name, _norm(gd.get("s")), v, vpos))
     return out
 
 
@@ -102,18 +112,30 @@ def _value_changed(old_v: str, new_v: str) -> bool:
     return True
 
 
+def _subject_before(text: str, pos: int) -> str:
+    """值前面最近的一个"人"：我（自己）或别人（弟弟/室友/他…）。没有就返回空。"""
+    head = text[:pos]
+    found = None
+    for m in _PERSON_REF.finditer(head):
+        found = m.group(0)
+    return found or ""
+
+
 def _rule_a(new: str, old: str) -> bool:
     new_slots = _slots(new)
     if not new_slots:
         return False
-    for name, s1, v1 in _slots(old):
-        for name2, s2, v2 in new_slots:
+    for name, s1, v1, _p1 in _slots(old):
+        for name2, s2, v2, p2 in new_slots:
             if name != name2 or not _value_changed(v1, v2):
                 continue
             if not _subj_match(s1, s2):
                 continue
-            if name in _PERSONAL and _about_other(new):
-                continue
+            if name in _PERSONAL:
+                # 个人属性只看"我"：值前面最近的人不是"我"，就是在说别人
+                who = _subject_before(new, p2)
+                if who and who != "我":
+                    continue
             if CHANGE.search(new) or name in _SINGLE_VALUE:
                 return True
     return False
@@ -128,7 +150,11 @@ def _rule_b(new: str, old: str) -> bool:
         return False
     if x not in new:
         return False
-    return bool(_NEGATED.search(new))
+    # 否定的必须**就是**旧的那个对象：X 要出现在否定词后面 6 个字以内
+    for neg in _NEGATED.finditer(new):
+        if x in new[neg.start():neg.start() + 6 + len(x)]:
+            return True
+    return False
 
 
 def _rule_c(new: str, old: str, kind: str) -> bool:

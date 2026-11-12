@@ -112,7 +112,8 @@ class Engine:
         ecfg = self.cfg.get("emotion", {})
         if os.path.exists(self._emo_file):
             try:
-                d = json.load(open(self._emo_file, encoding="utf-8"))
+                with open(self._emo_file, encoding="utf-8") as f:
+                    d = json.load(f)
                 d["params"] = {**d.get("params", {}), **ecfg}
                 e = Emotion.from_dict(d)
                 return e
@@ -222,12 +223,16 @@ class Engine:
 
     # ------------------------------------------------------------------ 冷存储"努力回想"
     def _cold_recall(self, ev: Event, query: str, extra, share: bool, mems: list, win) -> list:
-        """正常检索没想起来的事，再翻一次冷存储；够相关就重新激活（status 回 hot、计时归零）。"""
+        """正常检索没想起来的事，再单独翻一次冷存储；够相关就重新激活（status 回 hot）。
+
+        必须用 only_cold 查：冷条目权重被压到 cold_threshold，和热条目一起排名永远进不了前几名。
+        排序按 rel（相关性）而不是 score——冷条目本来就"很久没用了"。
+        """
         m = self.mcfg
         if not m.get("cold_recall", True):
             return mems
         try:
-            cold = self.store.search(query, ev.path, k=3, extra_paths=extra, include_cold=True,
+            cold = self.store.search(query, ev.path, k=12, extra_paths=extra, only_cold=True,
                                      include_turns=False, public=ev.scene == "comment",
                                      allow_projects=share, allowed_trusts=self._allowed_trusts(ev),
                                      touch=False, window=win[:2] if win else None)
@@ -236,12 +241,33 @@ class Engine:
             return mems
         seen = {x.id for x in mems}
         floor = float(m.get("cold_min_rel", 0.45))
-        cold = [c for c in cold if c.status == "cold" and c.rel >= floor and c.id not in seen][:2]
+        cold = sorted([c for c in cold if c.rel >= floor and c.id not in seen],
+                      key=lambda c: -c.rel)[:2]
         if not cold:
             return mems
-        self.store.touch([c.id for c in cold])
-        self.cost["cold_recalls"] += 1
-        return (list(mems) + cold)[:m.get("top_k", 8)]
+        top_k = m.get("top_k", 8)
+        out = list(mems)
+        added: list = []
+        replaced = 0
+        for c in cold:
+            if len(out) < top_k:
+                out.append(c)
+                added.append(c)
+            elif replaced < 2:
+                # 名额满了就顶掉得分最低的热条目，最多顶 2 条（别把这一轮的话题全冲掉）
+                keep = {a.id for a in added}
+                pool = [(i, x) for i, x in enumerate(out) if x.id not in keep]
+                if not pool:
+                    break
+                i, low = min(pool, key=lambda p: p[1].score)
+                out[i] = c
+                added.append(c)
+                replaced += 1
+        if added:
+            # 只激活**真正进了注入**的冷条目：没被注入却 touch 会把衰减计时白归零
+            self.store.touch([c.id for c in added])
+            self.cost["cold_recalls"] += 1
+        return out
 
     # ------------------------------------------------------------------ 观察（每条进来的消息都要过一遍）
     def observe(self, ev: Event) -> dict:
@@ -424,6 +450,16 @@ class Engine:
                 (ev.path, ptr)).fetchall()
             from .memory import _item
             turns = [_item(r) for r in rows]
+            # 一个批次不跨天：valid_from 取的是 batch 里最后一轮的时间，跨天会把"昨天说的"
+            # 记成"今天说的"，问"昨天决定了什么"就找不着了。剩下的留给下一批。
+            if turns:
+                first_day = time.strftime("%Y-%m-%d", time.localtime(turns[0].created))
+                for j, t in enumerate(turns):
+                    if time.strftime("%Y-%m-%d", time.localtime(t.created)) != first_day:
+                        turns = turns[:j]
+                        break
+            if not turns:
+                return
             self.store.meta_set(key, turns[-1].id)
         fut = self.bg.submit(self._extract_job, ev, turns)
         # 后台任务里的异常不会自己冒出来：至少留一条日志，不然"抽取悄悄停了"很难查

@@ -19,12 +19,12 @@ from typing import Iterable, Optional
 from .textutil import index_text, fts_query, jaccard, token_weights, overlap, tokens
 from .embedding import cosines, pack
 from .extractor import is_question
-from .conflicts import find_superseded
+from .conflicts import find_superseded, core_text
 
 log = logging.getLogger("soulcore")
 
 INDEX_VERSION = 2   # v2：索引里加入概念 token（见 concepts.py）
-SCHEMA_VERSION = 4  # v2：trust / pinned / 时间轴 / 墓碑；v3：due_at；v4：失效机制真正启用
+SCHEMA_VERSION = 5  # v2：trust/pinned/时间轴/墓碑；v3：due_at；v4：失效机制启用；v5：摘要上的 stale_note
 
 # 同类组：同一个槽位只该有一个当前值，所以只在组内找"被取代"的旧条目
 _KIND_GROUPS = (("fact", "preference", "person", "self"), ("decision",), ("todo",))
@@ -82,7 +82,8 @@ CREATE TABLE IF NOT EXISTS items(
   valid_from REAL,
   invalid_at REAL,
   superseded_by INTEGER,
-  due_at REAL
+  due_at REAL,
+  stale_note TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_items_path ON items(path, kind, status);
 CREATE INDEX IF NOT EXISTS ix_items_created ON items(created);
@@ -109,6 +110,7 @@ _MIGRATIONS = {
     "invalid_at": "REAL",
     "superseded_by": "INTEGER",
     "due_at": "REAL",          # 适合跟进的时刻（主动聊天的"跟进"念头用）
+    "stale_note": "TEXT",      # 摘要里有过时说法时的备注（不失效整条摘要）
 }
 
 # 老条目没有 trust：按路径回填。保守起见，群聊/评论区一律降级。
@@ -143,6 +145,7 @@ class Item:
     invalid_at: Optional[float] = None
     superseded_by: Optional[int] = None
     due_at: Optional[float] = None
+    stale_note: Optional[str] = None     # 摘要里混着旧说法时的一句话提醒（整条摘要仍然有效）
     score: float = 0.0
     weight_now: float = 0.0
     rel: float = 0.0        # 只算"相关性"、不算权重和时间衰减的得分（冷存储回想按它判断值不值得捞）
@@ -374,7 +377,7 @@ class MemoryStore:
             path, kind = r["path"], r["kind"]
             self.db.execute("UPDATE items SET invalid_at=?, superseded_by=? WHERE id=?",
                             (at, new_id, old_id))
-            self._invalidate_derived(path, old_id, new_id, at)
+            self._mark_stale_derived(path, old_id, new_id)
             owner_like = path == "core/self" or path.startswith("core/self/") or path.startswith("core/people/")
             if owner_like:
                 # 画像里抄了一份旧说法：标脏，下次 tick 用有效条目重算
@@ -383,27 +386,34 @@ class MemoryStore:
         self._annotate_mirror_line(path, kind, old_id, "superseded_by=%d" % (new_id or 0))
         return True
 
-    def _invalidate_derived(self, path: str, old_id: int, new_id: int | None, at: float) -> None:
-        """旧说法还留在早期的摘要里：一起标失效。
+    def _mark_stale_derived(self, path: str, old_id: int, new_id: int | None) -> None:
+        """旧说法还留在早期的摘要里：给摘要挂一句 stale_note，但**不**让整条摘要失效。
 
-        否则她一边知道"搬到上海了"，一边复述三个月前的摘要"住在北京"，自我矛盾。
-        摘要只是压缩过的历史，失效不删除，问"以前"时仍能翻到。
+        整条失效会把摘要里的其他信息一起藏起来（"注册上限每天 20 个"跟着"部署在香橙派"一起消失）。
+        渲染时在行尾追加"（注意：…已过时，现为…）"，旧说法不冒充现状，其他内容还在。
         """
         r = self.db.execute("SELECT content FROM items WHERE id=?", (old_id,)).fetchone()
         old_tokens = set(tokens(r["content"])) if r else set()
         if len(old_tokens) < 3:
             return
+        new_short = ""
+        if new_id:
+            n = self.db.execute("SELECT content FROM items WHERE id=?", (int(new_id),)).fetchone()
+            if n:
+                new_short = core_text(str(n["content"]))[:24]
+        old_short = core_text(str(r["content"]))[:24]
+        note = f"其中「{old_short}」已过时" + (f"（现在：{new_short}）" if new_short else "")
         rows = self.db.execute(
-            "SELECT id, content FROM items WHERE path=? AND kind='summary' AND invalid_at IS NULL "
-            "AND status NOT IN ('deleted','merged') LIMIT 200", (path,)).fetchall()
-        ids = []
+            "SELECT id, content, stale_note FROM items WHERE path=? AND kind='summary' "
+            "AND invalid_at IS NULL AND status NOT IN ('deleted','merged') LIMIT 200", (path,)).fetchall()
         for x in rows:
             st = set(tokens(x["content"]))
-            if st and len(old_tokens & st) / len(old_tokens) >= 0.6:
-                ids.append(x["id"])
-        if ids:
-            self.db.executemany("UPDATE items SET invalid_at=?, superseded_by=? WHERE id=?",
-                                [(at, new_id, i) for i in ids])
+            if not st or len(old_tokens & st) / len(old_tokens) < 0.6:
+                continue
+            if note in (x["stale_note"] or ""):
+                continue
+            merged = (x["stale_note"] + "；" if x["stale_note"] else "") + note
+            self.db.execute("UPDATE items SET stale_note=? WHERE id=?", (merged[:300], x["id"]))
 
     # ================= 墓碑：用户删掉的内容不再自动复活 =================
     @staticmethod
@@ -467,7 +477,8 @@ class MemoryStore:
                include_turns: bool = True, min_score: float = 0.02, touch: bool = True,
                include_cold: bool = False, public: bool = False, allow_projects: bool = True,
                allowed_trusts: Iterable[str] | None = None, count: bool = True,
-               include_history: bool = False, window: tuple[float, float] | None = None) -> list[Item]:
+               include_history: bool = False, window: tuple[float, float] | None = None,
+               only_cold: bool = False) -> list[Item]:
         """先搜当前分支子树，结果不够就逐级回退：父分支 → ... → core → 全局（全局打折最狠）
 
         隐私规则（回退到别的分支时生效）：
@@ -480,13 +491,14 @@ class MemoryStore:
 
         include_history：失效（被取代/作废）的条目也召回，分数打 6 折并标"已过时"——问"以前那件事"时用。
         window：(起, 止)：问句里解析出的过去时间窗。落在窗口内的条目加分，并在没实词时按时间直接取。
+        only_cold：只搜冷存储。冷回想要用它——混着热条目一起排，冷条目永远排不进前几名。
         """
         q = fts_query(query)
         qtok = token_weights(query)
         content_tokens = [t for t in tokens(query) if len(t) > 1]
         if not q and not window:
             return []
-        if include_cold:
+        if include_cold or only_cold:
             min_score *= 0.25     # 翻冷存储是主动回溯，门槛放低
         qv = None
         if q and self.embedder is not None:
@@ -506,8 +518,9 @@ class MemoryStore:
         now = self.clock()
         found: dict[int, Item] = {}
         # pinned 只豁免"转冷"，不豁免用户删除（deleted）和合并（merged）
-        status_sql = ("items.status IN ('hot','cold')" if include_cold
-                      else "(items.status='hot' OR (COALESCE(items.pinned,0)=1 AND items.status='cold'))")
+        status_sql = ("items.status='cold'" if only_cold else
+                      ("items.status IN ('hot','cold')" if include_cold
+                       else "(items.status='hot' OR (COALESCE(items.pinned,0)=1 AND items.status='cold'))"))
         if not include_history:
             status_sql += " AND items.invalid_at IS NULL"
         kind_sql = "" if include_turns else " AND items.kind!='turn'"
@@ -569,7 +582,7 @@ class MemoryStore:
                     if r["kind"] == "turn" and is_question(r["content"]):
                         rel *= 0.3                       # 以前问过的问题 ≠ 答案
                     w = self.weight(r, now)
-                    if include_cold:
+                    if include_cold or only_cold:
                         w = max(w, self.cold_threshold)
                     score = rel * w * d
                     if window and _in_window(r, window):
@@ -583,8 +596,11 @@ class MemoryStore:
                 # 时间问题常常没有实词（"昨天我们决定了什么"）：按时间直接取那一天的条目。
                 # 隐私靠复用本 scope 的 where（含 trust / 隐藏分支条件），每个 scope 各自查一次。
                 if window:
+                    # 只数**提炼条目**：原始对话也会落在窗口里，但它们随后会被"最近几轮"过滤掉，
+                    # 用它们判断"已经想到了"会让按时间直取永不触发（"昨天决定了什么"就这样丢掉答案）
                     in_win = sum(1 for it in found.values()
-                                 if window[0] <= (it.valid_from if it.valid_from is not None else it.created) <= window[1])
+                                 if it.kind != "turn"
+                                 and window[0] <= (it.valid_from if it.valid_from is not None else it.created) <= window[1])
                     if len(content_tokens) < 2 or in_win < 2:
                         rows = self.db.execute(
                             f"SELECT items.* FROM items WHERE {where} AND items.kind!='turn' "

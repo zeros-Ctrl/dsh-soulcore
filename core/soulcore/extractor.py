@@ -129,8 +129,21 @@ _CODE_BLOCK = re.compile(r"```[^\n]*\n(.*?)(?:```|\Z)", re.S)
 _LOG_LINE = re.compile(r"^\s*(at\s|File \"|Traceback|\d{2}:\d{2}:\d{2}|\[[^\]]+\]|\{.*\}|.*\[DEBUG\]|"
                        r"E\s+\w+Error)")
 _PHATIC_HINT = re.compile(r"记得|上次|之前|以前|我的|你还|还记|那个|昨天|上周|什么|吗|？|\?")
-_PHATIC = re.compile(r"^(嗯+|哦+|噢+|喔+|好+的?|好吧|ok+|okay|行+|可以|收到|了解|明白|知道了|哈+|嘿+|呵+|嘻|"
-                     r"继续|接着|go|谢谢|谢啦|thx|thanks|晚安|早安?|午安|在吗|在不在|1+|6+)$", re.I)
+_PHATIC_TOKEN = (r"嗯+|哦+|噢+|喔+|好+的?|好吧|ok+|okay|行+|可以|收到|了解|明白|知道了|哈+|嘿+|呵+|嘻|"
+                 r"继续|接着|go|谢谢|谢啦|thx|thanks|晚安|早安?|午安|在吗|在不在|1+|6+")
+# 允许 1–3 个寒暄词连写："好的谢谢""嗯嗯继续""ok好的"
+_PHATIC = re.compile(rf"^(?:{_PHATIC_TOKEN}){{1,3}}$", re.I)
+
+# 关于"我"和"我家里"的短句：一句话也可能是一条值得长期记住的信息
+_SELF_OR_KIN = re.compile(r"我(的)?(家|妈|爸|爷爷|奶奶|姥姥|姥爷|弟弟|妹妹|哥哥|姐姐|儿子|女儿|"
+                          r"女朋友|男朋友|老婆|老公|对象|朋友|同学|室友|同事|导师|老板|猫|狗)")
+# 长期指令：以后/下次/每次/别再/不要再/记得
+_LONG_TERM = re.compile(r"以后|下次|每次|别再|不要再|记得")
+# 祈使句（让我干活，不是告诉我事）
+_IMPERATIVE = re.compile(r"^(帮我|给我|让我|跟我|帮忙|请你|麻烦)")
+# 生活事件：这类短句常常没有"我"字，但信息量很高
+_EVENT = re.compile(r"被(拒|录取|裁|辞|骗)|住院|感冒|发烧|生病|分手|辞职|离职|跳槽|怀孕|结婚|"
+                    r"面试|答辩|考试|offer|升职|加薪|搬家|换工作")
 
 
 def is_phatic(text: str) -> bool:
@@ -193,7 +206,10 @@ def format_transcript(turns, limits: dict | None = None) -> str:
 
 
 def worth_extracting(turns) -> bool:
-    """这一批对话值不值得花一次 LLM 调用去提炼。全是寒暄/问句就跳过。"""
+    """这一批对话值不值得花一次 LLM 调用去提炼。全是寒暄/问句/祈使句才跳过。
+
+    宁可多提炼：QQ 里"我在深圳""我换工作了"这种短句很常见，漏掉就永远进不了长期记忆。
+    """
     for t in turns:
         if getattr(t, "role", "user") == "assistant":
             continue
@@ -204,15 +220,24 @@ def worth_extracting(turns) -> bool:
             return True
         if PERSONAL.search(text) or IDENTITY.search(text) or CHANGE.search(text):
             return True
+        if _EVENT.search(text):
+            return True
         try:
             if parse_followup(text, getattr(t, "created", 0) or time.time()):
                 return True
         except Exception:
             pass
-        if not is_question(text):
-            core = re.sub(r"[^\w一-鿿]", "", text)
-            if len(core) >= 12 and not is_phatic(text):
-                return True
+        if is_question(text) or is_phatic(text):
+            continue
+        core = re.sub(r"[^\w一-鿿]", "", text)
+        if _IMPERATIVE.match(core):
+            continue                       # "帮我改一下这个函数"是让我干活，不是告诉我事
+        if _SELF_OR_KIN.search(text) or re.match(r"^(我|我们)", core):
+            return True                    # 关于"我/我家里"的短句也算信息
+        if _LONG_TERM.search(text):
+            return True                    # "以后用中文回复我"这类长期指令
+        if len(core) >= 8:
+            return True
     return False
 
 
