@@ -92,7 +92,15 @@ class MockLLM:
             from .extractor import heuristic_extract
             from .timeparse import parse_due_string
             m = re.search(r"\[当前时间\] (\d{4}-\d{2}-\d{2} \d{2}:\d{2})", body)
-            return {"memories": heuristic_extract(body, parse_due_string(m.group(1)) if m else None)}
+            # [已有相关记忆] 之类的段落不是对话：只把 [对话] 之后的内容喂给规则提炼
+            talk = body.split("[对话]\n", 1)[1] if "[对话]" in body else body
+            return {"memories": heuristic_extract(talk, parse_due_string(m.group(1)) if m else None)}
+        if "TASK:PROFILE" in sys:
+            rows = [re.sub(r"^-\s*(\[[^\]]+\]\s*)?", "", ln).strip()
+                    for ln in body.splitlines() if ln.strip()]
+            return {"owner": "；".join(rows[:6])[:250],
+                    # 自我认识不能照抄主人档案：混进正文会让她把"主人"的事当成"自己"的事
+                    "self": "我记得主人告诉我的这些事，也会记住自己答应过的话。"}
         if "TASK:SUMMARIZE" in sys:
             lines = [l for l in body.splitlines() if l.strip()]
             return {"summary": "（摘要）" + "；".join(l[:20] for l in lines[:6])}
