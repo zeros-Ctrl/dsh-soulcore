@@ -18,11 +18,18 @@ from .memory import MemoryStore, TRUST_RANK, stricter
 from .textutil import tokens
 from .llm import make_llm, LLMError
 from .appraisal import appraise
-from .extractor import extract, summarize, turn_importance
-from .persona import load_card, build_system, build_context_block
+from .extractor import (extract_full, summarize, turn_importance, worth_extracting, is_phatic,
+                        format_transcript, EXTRACT_SYS, PROFILE_SYS)
+from .conflicts import core_text
+from .timeparse import query_window, wants_history
+from .persona import (load_card, build_system, build_context_block, make_anchor, detect_slips)
 from .stickers import StickerLib, prompt_hint
 
 log = logging.getLogger("soulcore")
+
+# 成本统计的键（T10）：只统计"能省下来的"和"真花出去的"，不上报内容
+COST_KEYS = ("extract_calls", "extract_skipped", "extract_in_chars", "retrieval_skipped",
+             "cold_recalls", "superseded", "inject_chars_total", "inject_count")
 
 # QQ 开着刷 B站 时常驻进提示词：说清楚她能做什么、看得到什么
 BILI_ABILITY = ("## 你会刷B站\n"
@@ -31,6 +38,12 @@ BILI_ABILITY = ("## 你会刷B站\n"
                 "你看不到画面、听不到声音；没有字幕的视频就只知道标题和简介。"
                 "被问到能做什么时照实说，别说自己刷不了，也别假装看过你没读过的视频。"
                 "之前说过刷不了的话以这里为准。")
+
+
+def _join_profile(rows, limit: int) -> str:
+    """规则版画像：把条目去掉前缀后拼起来（没有 LLM 时的兜底）"""
+    parts = [core_text(str(r["content"])) for r in rows]
+    return "；".join(p for p in parts if p)[:limit]
 
 
 def used_in_reply(memory: str, reply: str) -> bool:
@@ -62,6 +75,9 @@ class Engine:
         pcfg = cfg.get("persona", {})
         self.name = pcfg.get("name", "小汐")
         self.card = load_card(pcfg, base_dir)
+        self.pcfg = pcfg
+        # 人格锚点只在启动时算一次：每轮注入的是一两句"她是谁"，不是整张人设卡
+        self.anchor = make_anchor(self.card, pcfg) if pcfg.get("anchor_enabled", True) else ""
         scfg = (cfg.get("qq") or {}).get("sticker") or {}
         self.stickers = StickerLib(scfg.get("dir"), enabled=bool(scfg.get("enabled", True)))
         self._bili_busy = threading.Event()
@@ -76,6 +92,9 @@ class Engine:
         self.prev_label = None
         self.initiative = None          # 主动聊天模块（serve() 里挂上；见 initiative.py）
         self._injected: dict[str, tuple[list, float]] = {}   # path → (上一轮注入的记忆, 时刻)
+        self._last_mems: dict[str, tuple[list, float]] = {}   # 门控用：寒暄时沿用上一轮的记忆
+        # v0.8 成本统计：Delta 在 self.cost 里攒，tick() 时并进 meta 累加
+        self.cost = {k: 0 for k in COST_KEYS}
         # v0.4：主人档案统一到 core/people/owner，把老路径的条目迁过来，不然她会"忘记你"
         try:
             self.store.move_path("core/people/local/owner", "core/people/owner")
@@ -105,7 +124,16 @@ class Engine:
         tmp = self._emo_file + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.emo.to_dict(), f, ensure_ascii=False)
-        os.replace(tmp, self._emo_file)
+        # Windows 上杀毒软件 / 索引服务偶尔会短暂占用目标文件，rename 会假失败；
+        # 情绪状态丢一次不要紧，崩掉整个常驻进程才要紧
+        for _ in range(3):
+            try:
+                os.replace(tmp, self._emo_file)
+                return
+            except OSError as ex:
+                err = ex
+                time.sleep(0.02)
+        log.warning("情绪状态保存失败（下一条消息会再试）：%s", err)
 
     def _advance(self) -> None:
         self.emo.advance(self._now_min())
@@ -154,6 +182,66 @@ class Engine:
         if ev.platform == "local" or self._is_owner_qq(ev, private_only=True):
             return "core/people/owner"
         return ev.person_path
+
+    # ------------------------------------------------------------------ 人格锚点 / 助手腔提醒
+    def _slips(self) -> list[str]:
+        """没被忘记的"最近注意"提醒（72 小时内，最多 2 条）"""
+        ttl = float(self.pcfg.get("slip_ttl_h", 72)) * 3600
+        now = self.clock()
+        out = []
+        for r in self.store.meta_get("persona_slips", []) or []:
+            if not isinstance(r, dict) or not r.get("tip"):
+                continue
+            try:
+                ts = float(r.get("ts", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if now - ts < ttl:
+                out.append(str(r["tip"]))
+        return out[:2]
+
+    def _add_slips(self, tips) -> None:
+        """记下"最近注意"。同样的提醒只留最新一条，总数最多 5 条。"""
+        tips = [str(t).strip()[:40] for t in (tips or []) if str(t).strip()]
+        if not tips:
+            return
+        ttl = float(self.pcfg.get("slip_ttl_h", 72)) * 3600
+        now = self.clock()
+        rows = [r for r in (self.store.meta_get("persona_slips", []) or [])
+                if isinstance(r, dict) and r.get("tip") not in tips
+                and now - float(r.get("ts", 0) or 0) < ttl]
+        rows += [{"tip": t, "ts": now} for t in tips]
+        self.store.meta_set("persona_slips", rows[-5:])
+
+    def _profile_texts(self, ev: Event) -> tuple[str, str]:
+        """主人画像只在"主人自己的场景"注入：本地 DSH 或主人的 QQ 私聊。群聊/别人一概不给。"""
+        if not (ev.platform == "local" or self._is_owner_qq(ev, private_only=True)):
+            return "", ""
+        return (str(self.store.meta_get("profile_owner", "") or ""),
+                str(self.store.meta_get("profile_self", "") or ""))
+
+    # ------------------------------------------------------------------ 冷存储"努力回想"
+    def _cold_recall(self, ev: Event, query: str, extra, share: bool, mems: list, win) -> list:
+        """正常检索没想起来的事，再翻一次冷存储；够相关就重新激活（status 回 hot、计时归零）。"""
+        m = self.mcfg
+        if not m.get("cold_recall", True):
+            return mems
+        try:
+            cold = self.store.search(query, ev.path, k=3, extra_paths=extra, include_cold=True,
+                                     include_turns=False, public=ev.scene == "comment",
+                                     allow_projects=share, allowed_trusts=self._allowed_trusts(ev),
+                                     touch=False, window=win[:2] if win else None)
+        except Exception as ex:
+            log.info("冷存储回想失败：%s", ex)
+            return mems
+        seen = {x.id for x in mems}
+        floor = float(m.get("cold_min_rel", 0.45))
+        cold = [c for c in cold if c.status == "cold" and c.rel >= floor and c.id not in seen][:2]
+        if not cold:
+            return mems
+        self.store.touch([c.id for c in cold])
+        self.cost["cold_recalls"] += 1
+        return (list(mems) + cold)[:m.get("top_k", 8)]
 
     # ------------------------------------------------------------------ 观察（每条进来的消息都要过一遍）
     def observe(self, ev: Event) -> dict:
@@ -210,27 +298,45 @@ class Engine:
                 if proj and proj in ev.text:
                     extra.append(f"project/{proj}")
             touch_mode = m.get("touch_mode", "recency")
-            mems = [it for it in self.store.search(
-                query, ev.path, k=m.get("top_k", 8) + len(recent_ids), extra_paths=extra,
-                public=ev.scene == "comment",
-                allow_projects=share,
-                allowed_trusts=self._allowed_trusts(ev),
-                touch=touch_mode in ("inject", "recency"),
-                count=touch_mode == "inject")
-                if it.id not in recent_ids][:m.get("top_k", 8)]
-            if touch_mode in ("recency", "used"):
-                # 记下这一轮注入了什么，等回复出来再看有没有真的用到
-                self._injected[ev.path] = (list(mems), self.clock())
+            top_k = m.get("top_k", 8)
+            win = query_window(ev.text, self.clock())
+            gated = bool(m.get("gate_retrieval", True)) and is_phatic(ev.text)
+            if gated:
+                # 寒暄不检索：既省一次 embedding，也不会把不相干的旧事翻出来。
+                # 沿用上一轮的记忆（10 分钟内），沿用不算"又想起一次"，所以不 touch。
+                prev, ts = self._last_mems.get(ev.path, ([], 0.0))
+                mems = list(prev) if prev and self.clock() - ts <= 600 else []
+                self.cost["retrieval_skipped"] += 1
+            else:
+                mems = [it for it in self.store.search(
+                    query, ev.path, k=top_k + len(recent_ids), extra_paths=extra,
+                    public=ev.scene == "comment",
+                    allow_projects=share,
+                    allowed_trusts=self._allowed_trusts(ev),
+                    touch=touch_mode in ("inject", "recency"),
+                    count=touch_mode == "inject",
+                    include_history=wants_history(ev.text),
+                    window=win[:2] if win else None)
+                    if it.id not in recent_ids][:top_k]
+                if touch_mode in ("recency", "used"):
+                    # 记下这一轮注入了什么，等回复出来再看有没有真的用到
+                    self._injected[ev.path] = (list(mems), self.clock())
+                mems = self._cold_recall(ev, query, extra, share, mems, win)
+                self._last_mems[ev.path] = (list(mems), self.clock())
             person = self.store.by_path(self._person_path(ev), limit=6)
             rel = self.store.relation(ev.platform, ev.user_id)
             mood_text = self.emo.describe(self.prev_label)
             self.prev_label = self.emo.label(self.prev_label)
             now = self.clock()
+            # 寒暄轮不注入画像：她只需要保持人设，不需要把"关于你的一切"再背一遍（省 400 字）
+            profile_owner, profile_self = ("", "") if gated else self._profile_texts(ev)
         hint = ""
         lib = getattr(self, "stickers", None)
         if ev.platform == "qq" and lib is not None and lib.enabled:
             hint = prompt_hint(lib, 20)
-        system = build_system(self.card, ev, mood_text, rel, mems, person, now, emoji_hint=hint)
+        system = build_system(self.card, ev, mood_text, rel, mems, person, now, emoji_hint=hint,
+                              anchor=self.anchor, slips=self._slips(),
+                              profile_owner=profile_owner, profile_self=profile_self)
         bcfg = self._bili_cfg()
         if ev.platform == "qq" and bcfg:
             # 能力说明常驻：不然她只在触发时看到一段素材，不知道自己"会刷"，
@@ -274,6 +380,11 @@ class Engine:
     def commit_reply(self, ev: Event, reply: str, trust: str | None = None) -> None:
         if not reply:
             return
+        # 助手腔纠偏：不改她的回复，只记一条"最近注意"，下一轮注入时提醒一句
+        slips = detect_slips(reply, ev.platform)
+        if slips:
+            with self.lock:
+                self._add_slips(slips)
         t = self._trust(ev)
         if trust:
             t = stricter(t, trust)
@@ -297,13 +408,17 @@ class Engine:
 
     def _maybe_extract(self, ev: Event, force: bool = False) -> None:
         every = self.mcfg.get("extract_every", 6)
+        gap_min = float(self.mcfg.get("segment_gap_min", 30))
         key = f"extract_ptr:{ev.path}"
         with self.lock:
             ptr = self.store.meta_get(key, 0)
             n = self.store.db.execute("SELECT COUNT(*) FROM items WHERE path=? AND kind='turn' AND id>?",
                                       (ev.path, ptr)).fetchone()[0]
             if n == 0 or (n < every and not force):
-                return
+                # 话题段结束也是一种触发：两轮之间隔了半小时以上，前面的就先提炼掉，
+                # 免得一个批次里混进好几个话题
+                if n < 2 or not self._topic_gap(ev.path, gap_min):
+                    return
             rows = self.store.db.execute(
                 "SELECT * FROM items WHERE path=? AND kind='turn' AND id>? ORDER BY id LIMIT 60",
                 (ev.path, ptr)).fetchall()
@@ -311,21 +426,55 @@ class Engine:
             turns = [_item(r) for r in rows]
             self.store.meta_set(key, turns[-1].id)
         fut = self.bg.submit(self._extract_job, ev, turns)
+        # 后台任务里的异常不会自己冒出来：至少留一条日志，不然"抽取悄悄停了"很难查
+        fut.add_done_callback(lambda f: f.exception() and log.warning("记忆抽取异常：%s", f.exception()))
         if force:
             fut.result()
 
-    def _extract_job(self, ev: Event, turns) -> int:
-        try:
-            mems = extract(self.llm, turns, ev.path)
-        except Exception as ex:
-            log.warning("记忆抽取失败: %s", ex)
+    def _topic_gap(self, path: str, gap_min: float) -> bool:
+        rows = self.store.db.execute(
+            "SELECT created FROM items WHERE path=? AND kind='turn' ORDER BY id DESC LIMIT 2",
+            (path,)).fetchall()
+        return len(rows) == 2 and (rows[0]["created"] - rows[1]["created"]) > gap_min * 60
+
+    def _extract_job(self, ev: Event, turns, force: bool = False) -> int:
+        m = self.mcfg
+        if not force and m.get("extract_gate", True) and not worth_extracting(turns):
+            # 一批全是寒暄/问句：省一次 LLM 调用。指针已经前移，不会重复处理。
+            self.cost["extract_skipped"] += 1
             return 0
-        n = 0
         personal = ev.scene in ("private", "dm", "project", "session")
         # 一批原文可能混着不同来源：提炼结果取最不可信的那个，避免陌生人内容被主人一句话"洗白"
         trust = self._trust(ev)
         for t in turns:
             trust = stricter(trust, getattr(t, "trust", "owner") or "owner")
+        limits = {"assistant": int(m.get("extract_assistant_chars", 300)),
+                  "user": int(m.get("extract_user_chars", 800))}
+        # 提炼前先看看相关旧记忆：让模型在同一次调用里判断"是不是改了旧值"（0 次额外调用）
+        probe = " ".join(t.content for t in turns if t.role != "assistant")[-600:]
+        existing: list[dict] = []
+        if probe:
+            try:
+                cands = self.store.search(probe, ev.path, k=8, extra_paths=[self._person_path(ev)],
+                                          include_turns=False, touch=False, allow_projects=True,
+                                          allowed_trusts=self._allowed_trusts(ev))
+                existing = [{"id": c.id, "kind": c.kind, "content": c.content[:120]} for c in cands]
+            except Exception as ex:
+                log.info("取旧记忆失败：%s", ex)
+        self.cost["extract_calls"] += 1
+        self.cost["extract_in_chars"] += len(EXTRACT_SYS) + len(format_transcript(turns, limits))
+        try:
+            res = extract_full(self.llm, turns, ev.path, existing=existing,
+                               persona_hint=self.anchor, limits=limits)
+        except Exception as ex:
+            log.warning("记忆抽取失败: %s", ex)
+            return 0
+        mems = res.get("memories", [])
+        # 陌生人批次不能改写她的人设：只有主人在场的批次才接受 LLM 的"最近注意"
+        if trust == "owner":
+            self._add_slips(res.get("persona_slips") or [])
+        valid_from = max((getattr(t, "created", 0) or 0 for t in turns), default=0) or None
+        n = 0
         for mm in mems:
             about = mm["about"]
             if mm["project"] or about == "project":
@@ -338,11 +487,15 @@ class Engine:
                 path = ev.path
             tags = mm["tags"] + mm.get("keywords", []) + ([f"user:{ev.user_id}"] if about == "user" else [])
             with self.lock:
-                if self.store.write(path, mm["kind"], mm["content"], mm["importance"], tags=tags,
-                                    user_id=ev.user_id if about == "user" else "",
-                                    trust=trust, pinned=bool(mm.get("pinned")),
-                                    due_at=mm.get("due_at")):
+                nid = self.store.write(path, mm["kind"], mm["content"], mm["importance"], tags=tags,
+                                       user_id=ev.user_id if about == "user" else "",
+                                       trust=trust, pinned=bool(mm.get("pinned")),
+                                       due_at=mm.get("due_at"), valid_from=valid_from)
+                if nid:
                     n += 1
+                    for rid in mm.get("replaces") or ():
+                        if self.store.supersede(rid, nid, new_trust=trust):
+                            self.cost["superseded"] += 1
         return n
 
     def flush(self) -> None:
@@ -383,8 +536,14 @@ class Engine:
             # 人物档案只常驻最重要的 2 条（比如名字）；其余的靠和当前话题相关才被召回
             person = [p for p in self.store.by_path(self._person_path(ev), limit=2) if p.id not in shown]
             rel = self.store.relation(ev.platform, ev.user_id)
+            gated = bool(self.mcfg.get("gate_retrieval", True)) and is_phatic(ev.text)
+            profile_owner, profile_self = ("", "") if gated else self._profile_texts(ev)
         text = build_context_block(self.name, ctx["mood_text"], rel, mems, person, self.clock(),
-                                   self.mcfg.get("inject_max_chars", 1600))
+                                   self.mcfg.get("inject_max_chars", 1600), anchor=self.anchor,
+                                   slips=self._slips(), profile_owner=profile_owner,
+                                   profile_self=profile_self)
+        self.cost["inject_chars_total"] += len(text)
+        self.cost["inject_count"] += 1
         return {"text": text, "mood": ctx["mood"], "label": ctx["label"], "memories": ctx["memories"]}
 
     def remember(self, ev: Event, content: str, kind: str = "fact", importance: float = 0.85) -> int | None:
@@ -413,7 +572,7 @@ class Engine:
                       str(m.get("content", ""))[:4000], 0, 0, now, now, 0, "hot", "", "", None)
                  for m in messages if m.get("role") in ("user", "assistant") and m.get("content")]
         self._maybe_extract(ev, force=True)  # 先把还没抽取的 turn 处理掉
-        return self.bg.submit(self._extract_job, ev, turns).result()
+        return self.bg.submit(self._extract_job, ev, turns, True).result()
 
     # ------------------------------------------------------------------ 系统事件 / 维护
     def system_event(self, name: str) -> float:
@@ -542,6 +701,81 @@ class Engine:
             return f"{m // 60} 小时前"
         return f"{m // (24 * 60)} 天前"
 
+    # ------------------------------------------------------------------ 主人画像 / 每日反思
+    def _profile_inputs(self) -> tuple[list, list]:
+        """画像素材：主人档案里有效且可信的条目（pinned/重要性/最近想起优先）+ 她自己的认知。"""
+        with self.lock:
+            owner = self.store.db.execute(
+                "SELECT * FROM items WHERE (path='core/people/owner' OR path LIKE 'core/people/owner/%') "
+                "AND trust='owner' AND invalid_at IS NULL AND status NOT IN ('deleted','merged') "
+                "ORDER BY COALESCE(pinned,0) DESC, importance DESC, last_access DESC LIMIT 40").fetchall()
+            mine = self.store.db.execute(
+                "SELECT * FROM items WHERE (path='core/self' OR path LIKE 'core/self/%') AND trust='owner' "
+                "AND invalid_at IS NULL AND status NOT IN ('deleted','merged') "
+                "ORDER BY COALESCE(pinned,0) DESC, importance DESC, last_access DESC LIMIT 15").fetchall()
+        return list(owner), list(mine)
+
+    def _profile_changed(self, since: float) -> int:
+        with self.lock:
+            row = self.store.db.execute(
+                "SELECT COUNT(*) FROM items WHERE (path LIKE 'core/people/owner%' OR path LIKE 'core/self%') "
+                "AND trust='owner' AND invalid_at IS NULL AND status NOT IN ('deleted','merged') "
+                "AND created >= ?", (since,)).fetchone()
+        return int(row[0] if row else 0)
+
+    def reflect(self, force: bool = False) -> bool:
+        """定期把零散条目收成一段"主人是谁 / 我是谁"的画像（默认 20 小时且至少有 3 条新变化）。
+
+        画像只在主人的场景里注入；给别人看的上下文里不出现——这是隐私边界。
+        """
+        m = self.mcfg
+        now = self.clock()
+        last = float(self.store.meta_get("reflect_at", 0) or 0)
+        dirty = bool(self.store.meta_get("profile_dirty", False))
+        if not force and not dirty:
+            if now - last < float(m.get("reflect_every_h", 20)) * 3600:
+                return False
+            if self._profile_changed(last) < 3:
+                return False
+        owner_rows, self_rows = self._profile_inputs()
+        if not owner_rows and not self_rows:
+            return False
+        text = "\n".join(f"- [{r['kind']}] {core_text(r['content'])}" for r in owner_rows + self_rows)
+        prof = {}
+        try:
+            got = self.llm.chat_json([{"role": "system", "content": PROFILE_SYS},
+                                      {"role": "user", "content": text[:6000]}])
+            prof = got if isinstance(got, dict) else {}
+        except Exception as ex:
+            log.info("画像调用失败，用规则版：%s", ex)
+        owner = str(prof.get("owner") or "").strip()[:250]
+        mine = str(prof.get("self") or "").strip()[:150]
+        if not owner:
+            owner = _join_profile(owner_rows, 250)
+        if not mine:
+            mine = _join_profile(self_rows, 150)
+        self.store.meta_set("profile_owner", owner)
+        self.store.meta_set("profile_self", mine)
+        self.store.meta_set("reflect_at", now)
+        self.store.meta_set("profile_dirty", False)
+        return bool(owner or mine)
+
+    def _merge_cost(self) -> None:
+        """把这一段的增量并进 meta 累加（重启后还能看到总数）"""
+        saved = self.store.meta_get("cost_stats", {}) or {}
+        keys = set(saved) | set(self.cost)
+        self.store.meta_set("cost_stats", {k: int(saved.get(k, 0) or 0) + int(self.cost.get(k, 0) or 0)
+                                           for k in keys})
+        self.cost = {k: 0 for k in self.cost}
+
+    def _cost_totals(self) -> dict:
+        saved = self.store.meta_get("cost_stats", {}) or {}
+        out = {k: int(saved.get(k, 0) or 0) + int(self.cost.get(k, 0) or 0)
+               for k in set(saved) | set(self.cost)}
+        n = out.get("inject_count", 0)
+        out["inject_chars_avg"] = round(out.get("inject_chars_total", 0) / n, 1) if n else 0.0
+        return out
+
     def tick(self) -> dict:
         """定期维护：冷却、合并摘要、查余额。建议每 10~30 分钟调一次。"""
         with self.lock:
@@ -574,6 +808,12 @@ class Engine:
         except Exception as ex:
             log.warning("B站后台刷失败：%s", ex)
             res["bili_watch"] = False
+        try:
+            res["reflect"] = self.reflect()
+        except Exception as ex:
+            log.warning("反思失败：%s", ex)
+            res["reflect"] = False
+        self._merge_cost()
         return res
 
     def state(self) -> dict:
@@ -584,7 +824,7 @@ class Engine:
                     "label": e.label(self.prev_label), "describe": e.describe(self.prev_label),
                     "loneliness": round(e.L, 3), "baseline": round(sigmoid(e.b), 4),
                     "recent_events": [(n, round(a, 2)) for n, a, _ in e.recent[-8:]],
-                    "memory": self.store.stats()}
+                    "memory": self.store.stats(), "cost": self._cost_totals()}
 
     def close(self) -> None:
         self.bg.shutdown(wait=True)

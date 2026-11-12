@@ -3,7 +3,9 @@ from __future__ import annotations
 import json, os, copy
 
 DEFAULTS = {
-    "persona": {"name": "小汐", "card_file": "persona.md"},
+    # anchor：手动指定的人格锚点（留空则从人设卡里自动摘）；slip_ttl_h：助手腔提醒保留多久
+    "persona": {"name": "小汐", "card_file": "persona.md", "anchor": "", "anchor_enabled": True,
+                "slip_ttl_h": 72},
     "data_dir": "./data",
     "llm": {"provider": "deepseek", "base_url": "https://api.deepseek.com", "api_key": "",
             "api_key_env": "DEEPSEEK_API_KEY", "model": "deepseek-chat", "extract_model": "deepseek-chat",
@@ -12,7 +14,11 @@ DEFAULTS = {
     "appraisal": {"mode": "heuristic"},
     "owner": {"qq": "", "name": "主人"},      # 主人的 QQ 号：用来把 QQ 上的你认成 owner
     "memory": {"extract_every": 6, "recent_turns": 12, "top_k": 8, "cold_threshold": 0.04,
-               "consolidate_min": 30, "beta": 0.3, "tau_hours": {}, "touch_mode": "recency"},
+               "consolidate_min": 30, "beta": 0.3, "tau_hours": {}, "touch_mode": "recency",
+               # v0.8：知识更新 / 时间感知检索 / 冷存储回想 / 检索门控 / 提炼降本
+               "auto_supersede": True, "time_boost": 2.0, "cold_recall": True, "cold_min_rel": 0.45,
+               "gate_retrieval": True, "extract_assistant_chars": 300, "extract_user_chars": 800,
+               "segment_gap_min": 30, "reflect_every_h": 20},
     "balance": {"check_every_min": 60, "low_threshold": 5.0, "recharge_min": 5.0},
     "server": {"host": "127.0.0.1", "port": 8765, "token": "", "tick_every_min": 15},
     "service": {"mode": "follow_dsh"},

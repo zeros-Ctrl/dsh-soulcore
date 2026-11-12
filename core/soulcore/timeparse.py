@@ -148,6 +148,111 @@ def parse_followup(text: str, now: float) -> float | None:
     return due
 
 
+# ---------------- v0.8：从问句里解析"过去的"时间窗口 ----------------
+# "问历史"：这些词一出现，说明对方问的是"以前那件事"，失效条目也该被召回（并标成已过时）
+HISTORY_Q = re.compile(r"以前|之前|原来|曾经|过去|当初|一开始|最早|改之前|换之前|旧的|上一个|变过|变了")
+
+
+def wants_history(text: str) -> bool:
+    return bool(HISTORY_Q.search(text or ""))
+
+
+_WD = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6,
+       "1": 0, "2": 1, "3": 2, "4": 3, "5": 4, "6": 5, "7": 6}
+_DAYS_AGO = re.compile(rf"({_NUM})\s*天\s*(?:之前|以前|前)")
+_LAST_WEEK_DAY = re.compile(r"(?:上|上个|上一个)(?:周|星期|礼拜)\s*([一二三四五六日天1-7])")
+_A_MONTH_DAY = re.compile(rf"(?:({_NUM})\s*月)?\s*({_NUM})\s*[号日]")
+
+
+def _monday(ts: float) -> float:
+    """那一天所在周的周一 0 点"""
+    return _shift_days(_midnight(ts), -time.localtime(ts).tm_wday)
+
+
+def _month_start(ts: float, delta: int = 0) -> float:
+    t = time.localtime(ts)
+    y, mo = t.tm_year, t.tm_mon + delta
+    y, mo = y + (mo - 1) // 12, (mo - 1) % 12 + 1
+    return time.mktime((y, mo, 1, 0, 0, 0, 0, 0, -1))
+
+
+def query_window(text: str, now: float) -> tuple[float, float, str] | None:
+    """解析问句里的"过去的"时间窗口 → (起, 止, 去掉时间词后的问句)。
+
+    只处理今天和过去；"明天/下周/下个月"这类将来的说法返回 None（那不是回忆，是计划）。
+    """
+    text = text or ""
+    today = _midnight(now)
+
+    def ret(start: float, end: float, m) -> tuple[float, float, str]:
+        rest = (text[:m.start()] + " " + text[m.end():]).strip()
+        return start, end, rest
+
+    m = re.search(r"大前天", text)
+    if m:
+        d = _shift_days(today, -3)
+        return ret(d, _shift_days(d, 1), m)
+    m = re.search(r"前天", text)
+    if m:
+        d = _shift_days(today, -2)
+        return ret(d, _shift_days(d, 1), m)
+    m = re.search(r"昨天|昨晚|昨儿", text)
+    if m:
+        d = _shift_days(today, -1)
+        return ret(d, today, m)
+    m = re.search(r"今天|今早|今儿|今天早上", text)
+    if m:
+        return ret(today, now, m)
+    m = _DAYS_AGO.search(text)
+    if m:
+        n = _cn_int(m.group(1))
+        if n is not None and 0 < n <= 3650:
+            d = _shift_days(today, -n)
+            return ret(d, _shift_days(d, 1), m)
+    m = _LAST_WEEK_DAY.search(text)
+    if m:
+        d = _shift_days(_monday(now), -7 + _WD[m.group(1)])
+        return ret(d, _shift_days(d, 1), m)
+    m = re.search(r"上个?(?:周|星期|礼拜)", text)
+    if m:
+        mon = _monday(now)
+        return ret(_shift_days(mon, -7), mon, m)
+    m = re.search(r"这个?(?:周|星期|礼拜)|本(?:周|星期|礼拜)", text)
+    if m:
+        return ret(_monday(now), now, m)
+    m = re.search(r"上个?月", text)
+    if m:
+        return ret(_month_start(now, -1), _month_start(now), m)
+    m = re.search(r"这个?月|本月", text)
+    if m:
+        return ret(_month_start(now), now, m)
+    m = re.search(r"前几天|前些天", text)
+    if m:
+        return ret(now - 7 * 86400, _shift_days(today, -1), m)
+    m = re.search(r"最近|这几天|这两天|这些天", text)
+    if m:
+        return ret(now - 7 * 86400, now, m)
+    m = _A_MONTH_DAY.search(text)
+    if m:
+        mon = _cn_int(m.group(1)) if m.group(1) else None
+        day = _cn_int(m.group(2))
+        t = time.localtime(now)
+        if day and 1 <= day <= 31:
+            y, mo = t.tm_year, mon or t.tm_mon
+            if mon is None:
+                if day > t.tm_mday:                      # "20号"今天还没到 → 上个月那次
+                    y, mo = (y, mo - 1) if mo > 1 else (y - 1, 12)
+            elif (mo, day) > (t.tm_mon, t.tm_mday):      # "12月3号"今年还没到 → 去年那次
+                y -= 1
+            try:
+                d = time.mktime((y, mo, day, 0, 0, 0, 0, 0, -1))
+            except (OverflowError, ValueError):
+                return None
+            if time.localtime(d).tm_mday == day:
+                return ret(d, _shift_days(d, 1), m)
+    return None
+
+
 def parse_due_string(s: str) -> float | None:
     """LLM 给的绝对时间 "YYYY-MM-DD HH:MM"（或只有日期）→ 时间戳。"""
     s = (s or "").strip()
