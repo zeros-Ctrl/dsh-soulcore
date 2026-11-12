@@ -61,6 +61,11 @@ dsh plugin --profile desktop add "link:C:\Users\<你>\.dsh\plugins\dsh-soulcore"
 - **遗忘门**：权重 `w = 重要性 × e^(-Δt/τ) × (1 + 0.3·ln(1+被检索次数))`。τ 按类型设定：闲聊 3 天、事实 2 个月、决策 1 年。被想起一次就重新计时。太弱的记忆转为冷存储，不删除。名字、生日、过敏这类**永久事实**（`pinned`）不衰减。
 - **输出门**：先搜当前项目，不够再逐级回退到父级、core，最后是全局。跨分支回退时还会按**可信度**（trust）过滤，见下面"隐私规则"。
 - **细胞状态**：冷掉的原始对话攒够 30 条，就合并成一条摘要。
+- **知识更新（v0.8）**：新旧记忆有两条时间轴——`created` 是"入库时间"，`valid_from` 是"这件事是什么时候说的"。"我搬家了，现在住在上海浦东"会取代"我住在北京海淀区"：旧条目不删除，只标 `invalid_at`，常规检索看不到，问"以前住哪"时还能翻出来，并且渲染成**（已过时）**。规则版冲突检测（`conflicts.py`）负责在没有 API Key 时也能识别"换导师/改型号/戒咖啡"这类更新；有 Key 时 LLM 会在同一次提炼里填 `replaces`，不额外花钱。
+- **时间感知检索（v0.8）**：问句里的"昨天 / 3天前 / 上周三 / 5号 / 最近"会解析成时间窗，落在窗内的条目不只加分，还会在查询没什么实词时**直接按时间取**。比如"昨天我们决定了什么"。
+- **冷存储回想（v0.8）**：转冷的条目在相关问题出现时可以"努力想起来"，够相关就拉回热存储、衰减计时归零；不相关就继续躺着。
+- **检索门控（v0.8）**："嗯嗯""好的"这类纯寒暄不检索（省一次 embedding，也不把不相干的旧事翻出来），沿用 10 分钟内上一轮的记忆。
+- **人格锚点（v0.8）**：每轮注入一两句"她是谁"（从人设卡的"性格 / 说话方式 / 语气"里自动摘，≤120 字），预算优先给它；她说了"作为一个AI""希望对你有帮助"这类助手腔，会记一条"最近注意"，下次提醒自己，72 小时后自动过期。
 
 **"被注入"算不算"被想起"？** 由 `memory.touch_mode` 决定：
 
@@ -82,6 +87,25 @@ dsh plugin --profile desktop add "link:C:\Users\<你>\.dsh\plugins\dsh-soulcore"
 - B站评论区是公开场景，看不到任何其他聊天分支。
 - 每条记忆带来源可信度：本地 DSH、主人的 QQ 私聊是 `owner`；白名单私聊、群里的熟人是 `known`；群里的陌生人是 `stranger`；B站评论区是 `public`。本地项目只召回 `owner` 的记忆，所以**群里陌生人说的"记住……"进不了编程 agent 的上下文**。主人在群里说的话仍算 `owner`。
 - 用户在 Markdown 里删掉的条目会留下墓碑，自动提炼不会把它写回来。
+
+### v0.8 新增的开关
+
+| 配置项 | 默认 | 作用 |
+|---|---|---|
+| `memory.auto_supersede` | `true` | 写入时做规则版冲突检测，新说法改了旧值时把旧条目标成"已过时" |
+| `memory.time_boost` | `2.0` | 落在问句时间窗内的条目得分倍数 |
+| `memory.cold_recall` | `true` | 正常检索没想起来时，再翻一次冷存储 |
+| `memory.cold_min_rel` | `0.45` | 冷条目要多相关才值得"想起来" |
+| `memory.gate_retrieval` | `true` | 寒暄不检索，沿用上一轮的记忆 |
+| `memory.extract_assistant_chars` | `300` | 发给提炼模型时，她自己的发言最多保留多少字 |
+| `memory.extract_user_chars` | `800` | 同上，对方的发言 |
+| `memory.segment_gap_min` | `30` | 两轮间隔超过多少分钟就当作一个话题段结束，先提炼前面的 |
+| `memory.reflect_every_h` | `20` | 多久收一次主人画像（还要至少有 3 条新变化） |
+| `persona.anchor` | `""` | 手动指定人格锚点；留空就从人设卡里自动摘 |
+| `persona.anchor_enabled` | `true` | 关掉后不注入锚点行 |
+| `persona.slip_ttl_h` | `72` | "最近注意"的保留小时数 |
+
+画像（`memory.reflect_every_h`）只在你自己的场景注入：本地 DSH 或你的 QQ 私聊。群聊、别人私信里看不到；低可信来源的批次也不能改写她的人设。
 
 ## 情绪模型
 
@@ -163,7 +187,9 @@ QQ 用 **NapCat + 正向 WebSocket**：soulcore 主动连 NapCat，收发同一�
 ## 开发
 
 ```bash
-npm test                       # 14 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 114 个 Python 测试
+npm test                       # 14 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 168 个 Python 测试
+cd core && python -m unittest discover -s tests   # 只跑 Python 测试
+cd core && python -I bench/eval_longmem.py core ../docs/benchmark/longmem_v08.json   # 长记忆评测
 cd core && python -m soulcore --mock demo    # 离线演示：模拟一整天
 cd core && python -m soulcore --mock chat    # 命令行里直接和她聊（/skip 快进时间，/event 触发事件）
 ```

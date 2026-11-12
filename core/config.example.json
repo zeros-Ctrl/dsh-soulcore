@@ -1,5 +1,11 @@
 {
-  "persona": { "name": "小汐", "card_file": "persona.md" },
+  "persona": {
+    "name": "小汐",
+    "card_file": "persona.md",
+    "anchor": "",
+    "anchor_enabled": true,
+    "slip_ttl_h": 72
+  },
   "data_dir": "./data",
 
   "llm": {
@@ -31,7 +37,17 @@
     "consolidate_min": 30,
     "share_projects_in_chat": false,
     "touch_mode": "recency",
-    "tau_hours": { "turn": 72, "fact": 1440, "decision": 8760 }
+    "tau_hours": { "turn": 72, "fact": 1440, "decision": 8760 },
+
+    "auto_supersede": true,
+    "time_boost": 2.0,
+    "cold_recall": true,
+    "cold_min_rel": 0.45,
+    "gate_retrieval": true,
+    "extract_assistant_chars": 300,
+    "extract_user_chars": 800,
+    "segment_gap_min": 30,
+    "reflect_every_h": 20
   },
 
   "balance": { "check_every_min": 60, "low_threshold": 5.0 },
