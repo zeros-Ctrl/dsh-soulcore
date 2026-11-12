@@ -12,16 +12,29 @@ memory.py —— 分层记忆库（借鉴 LSTM 门控思想，但不训练网络
 路径即目录树：chat/qq/group/<群号>、chat/bilibili/dm/<uid>、project/<项目名>、core/people/...、core/self
 """
 from __future__ import annotations
-import math, os, re, sqlite3, threading, time, json
+import logging, math, os, re, sqlite3, threading, time, json
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
 from .textutil import index_text, fts_query, jaccard, token_weights, overlap, tokens
 from .embedding import cosines, pack
 from .extractor import is_question
+from .conflicts import find_superseded
+
+log = logging.getLogger("soulcore")
 
 INDEX_VERSION = 2   # v2：索引里加入概念 token（见 concepts.py）
-SCHEMA_VERSION = 3  # v2：trust / pinned / 时间轴 / 墓碑；v3：due_at
+SCHEMA_VERSION = 4  # v2：trust / pinned / 时间轴 / 墓碑；v3：due_at；v4：失效机制真正启用
+
+# 同类组：同一个槽位只该有一个当前值，所以只在组内找"被取代"的旧条目
+_KIND_GROUPS = (("fact", "preference", "person", "self"), ("decision",), ("todo",))
+
+
+def _kind_group(kind: str) -> tuple[str, ...]:
+    for g in _KIND_GROUPS:
+        if kind in g:
+            return g
+    return ()
 
 # 记忆来源的可信度。检索时按当前场景限制能召回哪些级别（见 search 的 allowed_trusts）。
 #   owner    ：主人本人（本地 DSH、主人的 QQ 私聊）
@@ -132,6 +145,7 @@ class Item:
     due_at: Optional[float] = None
     score: float = 0.0
     weight_now: float = 0.0
+    rel: float = 0.0        # 只算"相关性"、不算权重和时间衰减的得分（冷存储回想按它判断值不值得捞）
 
 
 class MemoryStore:
@@ -149,6 +163,8 @@ class MemoryStore:
         self.input_floor = cfg.get("input_floor", 0.05)
         self.cold_threshold = cfg.get("cold_threshold", 0.04)
         self.group_turn_tau_scale = cfg.get("group_turn_tau_scale", 0.5)
+        self.auto_supersede = cfg.get("auto_supersede", True)
+        self.time_boost = float(cfg.get("time_boost", 2.0))
         self.lock = threading.RLock()
         self.db = sqlite3.connect(os.path.join(data_dir, "memory.db"), check_same_thread=False)
         self.db.row_factory = sqlite3.Row
@@ -181,12 +197,16 @@ class MemoryStore:
               speaker: str = "", tags: Iterable[str] = (), user_id: str = "", dedup: bool = True,
               ts: float | None = None, mirror: bool = True, trust: str = "owner",
               pinned: bool = False, by_tombstone_ok: bool = False,
-              due_at: float | None = None) -> Optional[int]:
+              due_at: float | None = None, valid_from: float | None = None,
+              reconcile: bool = True) -> Optional[int]:
         """写一条记忆。
 
         trust          来源可信度（见 TRUST_LEVELS）。检索时按场景过滤，默认 owner。
         pinned         永久事实（名字/生日/过敏…）：不参与衰减，也不会转冷。
         by_tombstone_ok 用户主动写入（remember 工具）时绕过墓碑；自动提炼不绕过。
+        valid_from     这件事是什么时候说的 / 什么时候成立的。提炼时传原话的时间；
+                       检索的"时间感知"按它（而不是入库时间）判断条目属于哪一天。
+        reconcile      写入前先做规则版冲突检测：新说法真的改了旧值时，把旧条目标成"已过时"。
         """
         content = (content or "").strip()
         if not content or importance < self.input_floor:
@@ -198,10 +218,13 @@ class MemoryStore:
             tau *= self.group_turn_tau_scale
         tag_s = " ".join(sorted(set(t.strip("#") for t in tags if t)))
         merged = None
+        replaced: list[int] = []
         with self.lock:
             if kind != "turn" and not by_tombstone_ok and self._tombstoned(content):
                 return None      # 用户删过这条：自动提炼不再把它复活
-            if dedup and kind != "turn":
+            if reconcile and kind != "turn" and self.auto_supersede:
+                replaced = self._reconcile(path, kind, content)
+            if not replaced and dedup and kind != "turn":
                 dup = self._find_duplicate(path, kind, content)
                 if dup is not None:
                     merged = self._merge_duplicate(dup, path, kind, content, importance, now, tag_s, trust)
@@ -210,7 +233,7 @@ class MemoryStore:
                     "INSERT INTO items(path,kind,role,speaker,content,importance,tau_h,created,last_access,"
                     "tags,user_id,trust,pinned,valid_from,due_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (path, kind, role, speaker, content, float(importance), tau, now, now, tag_s, user_id,
-                     trust, 1 if pinned else 0, now, due_at))
+                     trust, 1 if pinned else 0, valid_from if valid_from is not None else now, due_at))
                 iid = cur.lastrowid
                 self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)",
                                 (iid, index_text(content + " " + tag_s + " " + speaker)))
@@ -220,6 +243,9 @@ class MemoryStore:
                 if due_at is not None:
                     self.db.execute("UPDATE items SET due_at=? WHERE id=? AND due_at IS NULL", (due_at, iid))
                     self.db.commit()
+        # 知识更新：新写法明确改了旧值 → 旧条目失效（不删除，问"以前"时还能召回）
+        for old in replaced:
+            self.supersede(old, iid, at=now, new_trust=trust)
         row = None
         if merged is not None:
             row = self.db.execute("SELECT content, importance FROM items WHERE id=?", (iid,)).fetchone()
@@ -240,7 +266,7 @@ class MemoryStore:
         """
         r = self.db.execute("SELECT content, tags, speaker, trust FROM items WHERE id=?", (dup,)).fetchone()
         old = r["content"] if r else ""
-        new_content = content if len(content) > len(old) else old
+        new_content = content if len(content) >= 0.8 * len(old) else old
         keep_trust = stricter(r["trust"] if r and r["trust"] else "owner", trust)
         self.db.execute(
             "UPDATE items SET importance=MAX(importance,?), last_access=?, status='hot',"
@@ -293,6 +319,91 @@ class MemoryStore:
             if jaccard(r["content"], content) >= thr:
                 return r["id"]
         return None
+
+    # ================= 知识更新：旧条目失效（不删除） =================
+    def _reconcile(self, path: str, kind: str, content: str) -> list[int]:
+        """规则版冲突检测：返回这条新内容应该取代的旧条目 id。
+
+        只在同一路径、同一类组、还没失效的条目里找。"宁可漏判"由 conflicts.py 保证。
+        """
+        group = _kind_group(kind)
+        if not group:
+            return []
+        q = fts_query(content)
+        if not q:
+            return []
+        marks = ",".join("?" * len(group))
+        rows = self.db.execute(
+            "SELECT items.id, items.content, items.kind FROM items_fts JOIN items ON items.id=items_fts.rowid "
+            f"WHERE items_fts MATCH ? AND items.path=? AND items.kind IN ({marks}) "
+            "AND items.status NOT IN ('merged','deleted') AND items.invalid_at IS NULL "
+            "ORDER BY bm25(items_fts) LIMIT 10", (q, path, *group)).fetchall()
+        return find_superseded(content, [(r["id"], r["content"], r["kind"]) for r in rows])
+
+    def supersede(self, old_id: int, new_id: int | None, *, at: float | None = None,
+                  new_trust: str = "owner") -> bool:
+        """让旧条目失效（不删除）。new_id 为 None 表示"作废但没有替代"。
+
+        - 可信度闸门：低可信来源不能推翻高可信记忆（陌生人不能让主人的记忆失效）
+        - pinned 也可以被取代：住址这种长期事实搬家后就是要更新
+        - Markdown 镜像里在同一行的 id 注释末尾追加 superseded_by=…，正文不动，
+          这样 sync_markdown() 不会把它当成"用户删了"或"用户改了"
+        """
+        try:
+            old_id = int(old_id)
+        except (TypeError, ValueError):
+            return False
+        if new_id is not None:
+            try:
+                new_id = int(new_id)
+            except (TypeError, ValueError):
+                return False
+            if new_id == old_id:
+                return False
+        with self.lock:
+            r = self.db.execute(
+                "SELECT id, path, kind, trust, status, invalid_at FROM items WHERE id=?", (old_id,)).fetchone()
+            if r is None or r["invalid_at"] is not None:
+                return False
+            if r["status"] in ("deleted", "merged") or r["kind"] == "turn":
+                return False
+            if TRUST_RANK.get(new_trust, 3) < TRUST_RANK.get(r["trust"] or "owner", 3):
+                log.info("拒绝用 %s 来源的记忆取代 #%s（%s）", new_trust, old_id, r["trust"])
+                return False
+            at = self.clock() if at is None else at
+            path, kind = r["path"], r["kind"]
+            self.db.execute("UPDATE items SET invalid_at=?, superseded_by=? WHERE id=?",
+                            (at, new_id, old_id))
+            self._invalidate_derived(path, old_id, new_id, at)
+            owner_like = path == "core/self" or path.startswith("core/self/") or path.startswith("core/people/")
+            if owner_like:
+                # 画像里抄了一份旧说法：标脏，下次 tick 用有效条目重算
+                self.db.execute("INSERT OR REPLACE INTO meta(k,v) VALUES('profile_dirty','true')")
+            self.db.commit()
+        self._annotate_mirror_line(path, kind, old_id, "superseded_by=%d" % (new_id or 0))
+        return True
+
+    def _invalidate_derived(self, path: str, old_id: int, new_id: int | None, at: float) -> None:
+        """旧说法还留在早期的摘要里：一起标失效。
+
+        否则她一边知道"搬到上海了"，一边复述三个月前的摘要"住在北京"，自我矛盾。
+        摘要只是压缩过的历史，失效不删除，问"以前"时仍能翻到。
+        """
+        r = self.db.execute("SELECT content FROM items WHERE id=?", (old_id,)).fetchone()
+        old_tokens = set(tokens(r["content"])) if r else set()
+        if len(old_tokens) < 3:
+            return
+        rows = self.db.execute(
+            "SELECT id, content FROM items WHERE path=? AND kind='summary' AND invalid_at IS NULL "
+            "AND status NOT IN ('deleted','merged') LIMIT 200", (path,)).fetchall()
+        ids = []
+        for x in rows:
+            st = set(tokens(x["content"]))
+            if st and len(old_tokens & st) / len(old_tokens) >= 0.6:
+                ids.append(x["id"])
+        if ids:
+            self.db.executemany("UPDATE items SET invalid_at=?, superseded_by=? WHERE id=?",
+                                [(at, new_id, i) for i in ids])
 
     # ================= 墓碑：用户删掉的内容不再自动复活 =================
     @staticmethod
@@ -355,7 +466,8 @@ class MemoryStore:
     def search(self, query: str, path: str, *, k: int = 8, extra_paths: Iterable[str] = (),
                include_turns: bool = True, min_score: float = 0.02, touch: bool = True,
                include_cold: bool = False, public: bool = False, allow_projects: bool = True,
-               allowed_trusts: Iterable[str] | None = None, count: bool = True) -> list[Item]:
+               allowed_trusts: Iterable[str] | None = None, count: bool = True,
+               include_history: bool = False, window: tuple[float, float] | None = None) -> list[Item]:
         """先搜当前分支子树，结果不够就逐级回退：父分支 → ... → core → 全局（全局打折最狠）
 
         隐私规则（回退到别的分支时生效）：
@@ -365,15 +477,19 @@ class MemoryStore:
           - public=True（B站评论区等公开场景）时，其他聊天分支的内容一律不可见
           - allowed_trusts：跨分支回退时只召回这些可信级别的条目。本分支不受限
             （本群/本私聊里的人说的话，本来就属于这个场景）。None 表示不限制（调试用）。
+
+        include_history：失效（被取代/作废）的条目也召回，分数打 6 折并标"已过时"——问"以前那件事"时用。
+        window：(起, 止)：问句里解析出的过去时间窗。落在窗口内的条目加分，并在没实词时按时间直接取。
         """
         q = fts_query(query)
-        if not q:
+        qtok = token_weights(query)
+        content_tokens = [t for t in tokens(query) if len(t) > 1]
+        if not q and not window:
             return []
         if include_cold:
             min_score *= 0.25     # 翻冷存储是主动回溯，门槛放低
-        qtok = token_weights(query)
         qv = None
-        if self.embedder is not None:
+        if q and self.embedder is not None:
             got = self.embedder.embed([query])
             qv = got[0] if got else None
         # 顺序：当前分支 → 指定的额外分支（对方档案、她自己）→ 逐级父分支 → core → 全局
@@ -392,6 +508,8 @@ class MemoryStore:
         # pinned 只豁免"转冷"，不豁免用户删除（deleted）和合并（merged）
         status_sql = ("items.status IN ('hot','cold')" if include_cold
                       else "(items.status='hot' OR (COALESCE(items.pinned,0)=1 AND items.status='cold'))")
+        if not include_history:
+            status_sql += " AND items.invalid_at IS NULL"
         kind_sql = "" if include_turns else " AND items.kind!='turn'"
         # 隐私隔离：别人的私聊/私信、别人的人物档案，在回退检索时不可见
         extras = [p for p in dict.fromkeys(extra_paths) if p and p != path]
@@ -425,11 +543,12 @@ class MemoryStore:
                     where = f"{status_sql}{kind_sql}{priv_sql}"
                     wargs = pargs
                 cand: dict[int, list] = {}   # id -> [row, 字词相关度, 语义相关度]
-                for r in self.db.execute(
-                        "SELECT items.* FROM items_fts JOIN items ON items.id=items_fts.rowid "
-                        f"WHERE items_fts MATCH ? AND {where} ORDER BY bm25(items_fts) LIMIT 40", (q, *wargs)):
-                    if r["id"] not in found:
-                        cand[r["id"]] = [r, overlap(qtok, r["content"] + " " + (r["tags"] or "")), 0.0]
+                if q:
+                    for r in self.db.execute(
+                            "SELECT items.* FROM items_fts JOIN items ON items.id=items_fts.rowid "
+                            f"WHERE items_fts MATCH ? AND {where} ORDER BY bm25(items_fts) LIMIT 40", (q, *wargs)):
+                        if r["id"] not in found:
+                            cand[r["id"]] = [r, overlap(qtok, r["content"] + " " + (r["tags"] or "")), 0.0]
                 if qv is not None:
                     rows = self.db.execute(
                         f"SELECT items.*, vecs.v AS _v FROM items JOIN vecs ON vecs.id=items.id WHERE {where}",
@@ -453,10 +572,33 @@ class MemoryStore:
                     if include_cold:
                         w = max(w, self.cold_threshold)
                     score = rel * w * d
+                    if window and _in_window(r, window):
+                        score *= self.time_boost         # 问"昨天"的时候，昨天那条更该被想起
+                    if include_history and r["invalid_at"] is not None:
+                        score *= 0.6                     # 已过时的条目排在后面，但仍然看得见
                     if score < min_score:
                         continue
-                    it = _item(r); it.score = score; it.weight_now = w
+                    it = _item(r); it.score = score; it.weight_now = w; it.rel = rel
                     found[iid] = it
+                # 时间问题常常没有实词（"昨天我们决定了什么"）：按时间直接取那一天的条目。
+                # 隐私靠复用本 scope 的 where（含 trust / 隐藏分支条件），每个 scope 各自查一次。
+                if window:
+                    in_win = sum(1 for it in found.values()
+                                 if window[0] <= (it.valid_from if it.valid_from is not None else it.created) <= window[1])
+                    if len(content_tokens) < 2 or in_win < 2:
+                        rows = self.db.execute(
+                            f"SELECT items.* FROM items WHERE {where} AND items.kind!='turn' "
+                            "AND COALESCE(items.valid_from, items.created) BETWEEN ? AND ? "
+                            "ORDER BY items.importance DESC LIMIT ?",
+                            (*wargs, window[0], window[1], k)).fetchall()
+                        for r in rows:
+                            if r["id"] in found:
+                                continue
+                            w = self.weight(r, now)
+                            it = _item(r); it.rel = 0.4; it.weight_now = w
+                            it.score = 0.4 * w * d * self.time_boost
+                            if it.score >= min_score:
+                                found[r["id"]] = it
                 if len(found) >= k and si >= must - 1:
                     break
             ranked = sorted(found.values(), key=lambda x: -x.score)
@@ -500,7 +642,8 @@ class MemoryStore:
         return [_item(r) for r in reversed(rows)]
 
     def by_path(self, path: str, kinds: Iterable[str] | None = None, limit: int = 20) -> list[Item]:
-        sql = "SELECT * FROM items WHERE (path=? OR path LIKE ?) AND (status='hot' OR (COALESCE(pinned,0)=1 AND status='cold'))"
+        sql = ("SELECT * FROM items WHERE (path=? OR path LIKE ?) AND invalid_at IS NULL "
+               "AND (status='hot' OR (COALESCE(pinned,0)=1 AND status='cold'))")
         args: list = [path, path + "/%"]
         if kinds:
             kinds = list(kinds)
@@ -781,6 +924,39 @@ class MemoryStore:
         with open(fn, "a", encoding="utf-8") as f:
             f.write(line)
 
+    def _annotate_mirror_line(self, path, kind, iid, note) -> bool:
+        """在 Markdown 镜像那一行的 id 注释末尾追加标记（不改正文）。
+
+        正文不变 → sync_markdown() 不会把它当成"用户改过"；注释里多一段也不影响 _MD_LINE
+        匹配（id 之后到 --> 之间是 [^>]*）。
+        """
+        if kind == "turn":
+            return False
+        fn = os.path.join(self.md_root, *path.split("/"), self._md_name(kind))
+        if not os.path.exists(fn):
+            return False
+        try:
+            with open(fn, encoding="utf-8") as f:
+                lines = f.read().split("\n")
+        except OSError:
+            return False
+        pat = re.compile(r"(<!--\s*id=%d(?=[^>]*-->)[^>]*?)(\s*-->)" % int(iid))
+        out, changed = [], False
+        for line in lines:
+            if iid and note not in line and re.search(r"<!--\s*id=%d(?!\d)" % int(iid), line):
+                new = pat.sub(lambda m: f"{m.group(1)} {note}{m.group(2)}", line, count=1)
+                if new != line:
+                    changed = True
+                    line = new
+            out.append(line)
+        if not changed:
+            return False
+        tmp = fn + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("\n".join(out))
+        os.replace(tmp, fn)
+        return True
+
     def _rewrite_mirror_line(self, path, kind, iid, content, imp, ts) -> bool:
         """去重合并后，把 Markdown 里对应的那一行改成新内容。
 
@@ -824,6 +1000,20 @@ def _pinned(it) -> bool:
         return bool(it["pinned"])
     except (IndexError, KeyError, TypeError):
         return bool(getattr(it, "pinned", 0))
+
+
+def _in_window(r, window: tuple[float, float]) -> bool:
+    """条目的"时间"= COALESCE(valid_from, created)：说的是哪天的事，而不是哪天入库的"""
+    try:
+        t = r["valid_from"]
+    except (IndexError, KeyError):
+        t = getattr(r, "valid_from", None)
+    if t is None:
+        try:
+            t = r["created"]
+        except (IndexError, KeyError):
+            t = getattr(r, "created", 0.0)
+    return window[0] <= t <= window[1]
 
 
 def _item(r) -> Item:
