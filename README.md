@@ -107,6 +107,12 @@ dsh plugin --profile desktop add "link:C:\Users\<你>\.dsh\plugins\dsh-soulcore"
 
 画像（`memory.reflect_every_h`）只在你自己的场景注入：本地 DSH 或你的 QQ 私聊。群聊、别人私信里看不到；低可信来源的批次也不能改写她的人设。
 
+### 已知局限（v0.8.1）
+
+- **锚点和画像每轮都追加在消息里**，所以平均注入比 v0.7 多了约 50%（200 天长记忆评测：441 → 662 字）。它们一天才变一次，下一版会挪进 JS 的 `systemPrompt.section` 吃提示缓存，每轮只留心情、提醒和检索结果。
+- **纯寒暄的注入没有变短**：门控省掉的是检索（和一次 embedding），但锚点、上一轮记忆仍然在，`eval_longmem` 里 `inject_chars_phatic` 比基线高 49%。这是"人设不漂"和"上下文更短"之间的取舍。
+- **冷存储回想要条目真的转冷**（约 186 天/事实）才有意义；刚过期但还没冷却的条目本来就能正常召回。
+
 ## 情绪模型
 
 情绪值的范围是 (0, 1)，0 是悲伤，1 是开心，两端都到不了。计算过程：
@@ -187,7 +193,7 @@ QQ 用 **NapCat + 正向 WebSocket**：soulcore 主动连 NapCat，收发同一�
 ## 开发
 
 ```bash
-npm test                       # 14 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 169 个 Python 测试
+npm test                       # 14 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 172 个 Python 测试
 cd core && python -m unittest discover -s tests   # 只跑 Python 测试
 cd core && python -I bench/eval_longmem.py core ../docs/benchmark/longmem_v08.json   # 长记忆评测
 cd core && python -m soulcore --mock demo    # 离线演示：模拟一整天
