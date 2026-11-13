@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.9.0 — 2026-11-13
+
+Claude Code 接入（hooks + MCP + 插件打包）、通用 HTTP 接口文档、记忆管理接口，以及两个会丢记忆的遗留问题。
+
+- **R1 Markdown 镜像加锁。** 以前 `_mirror` / `_annotate_mirror_line` / `_rewrite_mirror_line` /
+  `_move_mirror` / `_sync_file` 都在 `self.lock` 外面做"读 → 改 → `os.replace`"：后台提炼线程、
+  tick 线程、HTTP 线程并发写同一个 `notes.md` 时会互相覆盖，被覆盖的行下一轮 `sync_markdown()`
+  判成"用户删了"→ 标 deleted + 墓碑 → **记忆永久丢失**（Windows 上还偶发 `PermissionError`）。
+  - 新增 `MemoryStore.md_lock`（`RLock`），锁顺序固定为**先 `md_lock` 后 `self.lock`**；
+  - 新增模块级 `atomic_write(path, text, retries=5)`：先写 `.tmp` 再 `os.replace`，
+    遇到 `PermissionError` sleep 50ms 重试；所有改写 Markdown 的地方统一用它；
+  - 新增 `test_v09_md_lock.py`：2 个线程各写 200 条 fact + 1 个线程并发 supersede/改注释，
+    连续 3 轮，`sync_markdown(force=True)` 后 `deleted == 0` 且每条都有 id 注释。
+- **R2 门控补漏。** `worth_extracting` 增加：转述（`导师说中期推迟`）、状态变化词
+  （`推迟/取消/不上班/请假/搬家/分手…`）、"有时间词的陈述句"（`明天不上班`）；
+  同时排除敷衍和应答（`明天再说吧`、`好的明天` 仍然不提炼）。
+  `conflicts._rule_b` 修掉"咖啡因"误判：X 后面跟 `因/机/店/馆/杯/豆/粉/味` 时不算同一个对象。
+- **R3 稳定块进 system prompt。** 锚点 / 主人画像 / 她对自己的认识一天才变一次，以前每轮追加在消息末尾。
+  - 新增 `Engine.stable_block()` 和 `GET /v1/persona/stable`（`version` = sha1 前 12 位）；
+  - `context_block(include_stable=False)` 不再输出锚点/画像/自我认识（slips 仍然输出，它是易变的）；
+  - DSH 侧缓存稳定块、在 `version` 变化时才替换，`agent/pre-step` 带 `include_stable: false`；
+  - `eval_longmem --split-stable`：每轮注入 662 → 470 字，纯寒暄 695 → 90 字，其余指标不变。
+- **R4 记忆管理接口。** `GET /v1/memory/timeline`（含 `path` / `top`）、`POST /v1/memory/forget`、
+  `POST /v1/memory/restore`、`POST /v1/hooks/flush`。`forget` 标 deleted + 墓碑 + 删镜像行，
+  只允许 `owner`/`known` 来源（陌生人 403）；`restore` 清失效标记/去墓碑/补镜像行。
+- **K1 `soulcore.client`。** `resolve_home()`（`SOULCORE_HOME` → `~/.dsh/soulcore` → `~/.soulcore`，
+  首次自动写 config/persona），`Backend.discover/ensure/request`：后台分离启动后端（pythonw +
+  DETACHED_PROCESS，日志重定向，`serve.starting` 标记防并发重复 spawn，随机端口），
+  401/连接失败自动重读锁文件重试；新增 `serve --idle-exit-min`（Claude Code 拉起的后端四小时空闲自退）。
+- **K2 `soulcore cc-hook`。** 5 个事件：SessionStart / UserPromptSubmit / Stop / PreCompact / SessionEnd，
+  按官方文档输出 `hookSpecificOutput.additionalContext`，**失败即放行**（任何异常都 exit 0、不输出、只写日志，
+  超过脚本自己的时间预算就丢弃输出）。`cc.style` 两种风格：`memory`（默认，只给跨会话记忆）/
+  `companion`（完整人格）。transcript 从尾部读 2MB、逐行容错、跳过子 agent 和压缩摘要、
+  不取 tool_result；官方文档新增的 `last_assistant_message` 优先使用，transcript 解析作为兜底。
+  项目名规则（向上找 `.git` 用仓库根目录名）和 DSH 完全一致，两边共用 `project/<名>`。
+- **K3 `soulcore mcp`。** 标准库实现的 stdio MCP server：`initialize` / `ping` / `tools/list` /
+  `tools/call` / `notifications/initialized`，6 个工具（`memory_search` / `remember` / `forget` /
+  `restore` / `memory_timeline` / `mood_status`），后端不可用返回 `isError` + 可读说明，
+  stdout 只有 JSON-RPC。各客户端配置见 `docs/mcp.md`。
+- **K4 Claude Code 插件打包。** `.claude-plugin/{plugin.json,marketplace.json}`、`hooks/hooks.json`、
+  `.mcp.json`、`bin/soulcore-{hook,mcp}`（POSIX sh，依次找 `SOULCORE_PYTHON`/python3/python/py -3/
+  DSH 自带运行时）、`commands/{recall,remember,memories,mood}.md`、`cc-install`
+  （默认只打印，`--apply` 先备份再合并，幂等，`--uninstall` 只移除 soulcore 的项）。
+  `claude plugin validate .` 通过。
+- **K5 通用接口文档 + showcase。** `docs/http-api.md`（鉴权、Event 字段表、每个接口的请求/响应、
+  30 行 Python 示例、隐私规则）；`python -m soulcore --mock showcase` 离线打印三段对照
+  （新会话还记得 / 知道哪些过时了 / 心情慢慢变），0.5 秒跑完，UTF-8 不乱码。
+- **K6 文档拆分。** README 首屏重写成"一句话 + 三类用户表 + showcase + 效果数字 + 先试试"；
+  细节拆到 `docs/how-memory-works.md`、`docs/emotion.md`、`docs/qq.md`、`docs/claude-code.md`、
+  `docs/mcp.md`、`docs/http-api.md`、`docs/config.md`；新增"隐私与数据"一节。
+- **测试**：Python 173 → 261（新增 `test_v09_*` 88 个），JS 14 → 18。
+- **未做**：K7（真实 LLM 小规模评测）和 K8（OpenAI 兼容代理）是可选任务，本版本没有实现。
+
 ## 0.8.1 — 2026-11-12
 
 复审修正：两个必须修的缺陷（冷存储回想、提炼门控），三个该修的问题（注入丢时间、摘要整条失效、冲突误判），外加几个小问题。
