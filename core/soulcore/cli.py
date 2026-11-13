@@ -247,6 +247,12 @@ def cmd_demo(args):
     run_demo(args.data or "demo_data")
 
 
+def cmd_showcase(args):
+    """一键体验：离线跑三段对照（新会话还记得 / 知道哪些过时 / 心情慢慢变）"""
+    from .showcase import main as showcase_main
+    sys.exit(showcase_main())
+
+
 def main(argv=None):
     for s in (sys.stdout, sys.stderr):
         try:
@@ -285,6 +291,7 @@ def main(argv=None):
     ci.add_argument("--uninstall", action="store_true", help="移除 soulcore 的 hooks")
     ci.set_defaults(fn=cmd_cc_install)
     sub.add_parser("demo", help="离线演示：模拟一天的 QQ/B站/项目消息").set_defaults(fn=cmd_demo)
+    sub.add_parser("showcase", help="一键体验：三段对照演示（离线，30 秒内）").set_defaults(fn=cmd_showcase)
     sub.add_parser("install-service", help="注册常驻计划任务（登录时自动启动，Windows）").set_defaults(fn=cmd_install_service)
     sub.add_parser("uninstall-service", help="删除常驻计划任务").set_defaults(fn=cmd_uninstall_service)
     sub.add_parser("service-start", help="立刻运行常驻计划任务（Windows）").set_defaults(fn=cmd_service_start)
