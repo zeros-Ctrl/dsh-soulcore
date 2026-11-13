@@ -9,7 +9,7 @@
 仓库公开后，可以直接安装：
 
 ```bash
-dsh plugin --profile desktop add github:zeros-Crtl/dsh-soulcore
+dsh plugin --profile desktop add github:zeros-Ctrl/dsh-soulcore
 ```
 
 也可以从 GitHub 下载 ZIP，解压到含有 `package.json` 和 `cordis.patch.yml` 的目录，再用本地路径安装：

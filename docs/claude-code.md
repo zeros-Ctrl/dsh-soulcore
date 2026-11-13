@@ -6,7 +6,7 @@
 ## 方式 A：作为 Claude Code 插件（推荐）
 
 ```bash
-/plugin marketplace add zeros-Crtl/dsh-soulcore
+/plugin marketplace add zeros-Ctrl/dsh-soulcore
 /plugin install soulcore@dsh-soulcore
 ```
 

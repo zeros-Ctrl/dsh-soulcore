@@ -7,7 +7,7 @@
 仓库公开后，在终端执行：
 
 ```bash
-dsh plugin --profile desktop add github:zeros-Crtl/dsh-soulcore
+dsh plugin --profile desktop add github:zeros-Ctrl/dsh-soulcore
 ```
 
 重新启动 DSH，让 desktop profile 加载插件。
