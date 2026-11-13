@@ -1,215 +1,85 @@
-# dsh-soulcore · 人格与记忆
+# dsh-soulcore · 给 AI 编程助手和聊天机器人加上跨会话长期记忆和稳定人格，纯本地、零依赖
 
-给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里的 agent 加三样东西：
+只用 Python 标准库，不装任何第三方包；记忆、情绪、人设全在你自己机器上。
 
-- **独立人格**：她有自己的性格基线，不会只顺着用户的情绪走。
-- **会慢慢变化的情绪**：事件只改变她"想到达的心情"，实际心情由 PID 平滑地跟过去，相邻两分钟之间几乎不会跳变。
-- **分层长期记忆**：按项目、会话归档；权重会随时间衰减，被想起时刷新；**上下文压缩之前会先把内容提炼落盘**，压缩后不会失忆。
+| 用户 | 用在哪 | 一行安装 | 得到什么 |
+|---|---|---|---|
+| 写代码的（DSH） | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh plugin --profile desktop add github:zeros-Crtl/dsh-soulcore` | 人设 + 情绪 + 按项目归档的记忆，压缩前自动抢救 |
+| 写代码的（Claude Code） | Claude Code CLI | `/plugin marketplace add zeros-Crtl/dsh-soulcore` + `/plugin install soulcore@dsh-soulcore` | 跨会话记忆（可切完整人格）+ 6 个 MCP 工具 |
+| 任何 MCP 客户端 | Cursor / Claude Desktop / Cherry Studio | 见 [docs/mcp.md](docs/mcp.md) | 同一份记忆，工具调用 |
+| 聊天机器人 | QQ（NapCat） | 见 [docs/qq.md](docs/qq.md) | QQ 私聊/群 + B站 + 主动聊天 |
+| 开发者 | 自己的 bot | 见 [docs/http-api.md](docs/http-api.md) | 一套 HTTP 钩子，30 行接入 |
 
-不需要另外装 Python：插件直接使用 DSH 自带的 Python 3.12 运行时，而且核心只依赖标准库。
+> 上面两条 GitHub 安装命令要等仓库推送到 GitHub 之后才能用（本版本没有替你 push）。
+> 本地先用 `dsh plugin add "link:<本地目录>"` 或 `claude --plugin-dir <本地目录>`。
 
-## 安装
+```
+① 新会话还记得（第 1 天说，第 30 天问"我们为什么不用向量库"）
+  【没有插件】模型只看得到这一句，之前 30 天的对话一条都看不到
+  【装了 soulcore】- [decision·30天前] 主人说：检索层决定用 SQLite+FTS5，不上向量库，因为要本地轻量部署
+
+② 知道哪些说法过时了（问"以前部署在哪"）
+  - （已过时）[fact·2个月前] 博客部署在香橙派上
+  - [fact·刚才] 博客已经迁到阿里云服务器上了
+
+③ 心情是慢慢变的：夸一次 0.62 → 30 分钟 0.70；凶一次 0.62 → 60 分钟 0.47（不会跳变）
+```
+
+| 200 天长记忆评测（规则提炼、离线模拟、seed 42） | 结果 |
+|---|---|
+| 知识更新（旧说法不再冒充现状） | 8/8 |
+| 时间问题（"昨天/3天前决定了什么"） | 4/4 |
+| 超长间隔 + 热干扰下的冷回想 | 6/6 |
+| 普通召回对照 | 4/4 |
+| 隐私泄漏（群里的陌生人打听主人私事） | 0 |
+| 每轮注入 | 平均 470 字，纯寒暄 90 字（v0.9 stable 拆分后） |
+
+**先试试**（不用 key、不联网、30 秒）：
 
 ```bash
-# 从 GitHub 安装
-dsh plugin --profile desktop add github:zeros-Crtl/dsh-soulcore
-
-# 或者从本地目录安装（开发时用）
-dsh plugin --profile desktop add "link:C:\Users\<你>\.dsh\plugins\dsh-soulcore"
+python -m soulcore --mock showcase
 ```
 
-装好后重启 DSH，打开 **设置 → 人格与记忆**：
+## 文档
 
-1. 顶部状态卡显示心情条。"后端就绪"说明装好了。
-2. 修改人设（persona.md），设置角色名和她对你的称呼。
-3. （可选）填写 DeepSeek API Key，记忆提炼会更聪明。不填也能用，会改用规则提炼。
+- [记忆是怎么工作的](docs/how-memory-works.md)：门控、衰减、知识更新、时间检索、冷回想、隐私规则
+- [情绪模型](docs/emotion.md)
+- [QQ / B站 / 主动聊天](docs/qq.md)
+- [Claude Code 接入](docs/claude-code.md)
+- [MCP 接入](docs/mcp.md)（Claude Code / Cursor / Claude Desktop / Cherry Studio）
+- [HTTP 接口](docs/http-api.md)（AstrBot / NoneBot / 自写 bot）
+- [配置项全表](docs/config.md)
+- [DSH 插件开发说明](docs/core.md)
 
-可以点状态卡上的"试试：夸她 / 凶她"，观察心情条在几十分钟内慢慢变化。
+## 隐私与数据
 
-## 它挂在 DSH 的哪些地方
-
-| DSH 挂点 | 做什么 |
-|---|---|
-| `systemPrompt.section` | 把人设写进 system prompt。内容稳定，不会破坏提示缓存 |
-| `agent/pre-step`（每轮第一步） | 把用户这句话交给后端：判断情绪事件（被夸、被凶、道歉……），更新心情和好感，召回相关记忆，再追加一条 snapshot 消息（与 DSH 自带的 time-context 做法相同） |
-| `session/event` → `turn/end` | 把她这一轮的最终回复写回记忆；每 6 轮提炼一次长期记忆 |
-| `llm/stream`（`purpose: "compaction"`） | 压缩前拿到即将被压掉的原文，提炼成事实、决策、偏好后落盘 |
-| `tools` | `memory_search`、`remember`、`mood_status`，让模型能主动查记忆、记东西 |
-| `webServer` + 客户端 section | 设置页。走 DSH 信任栅栏；栅栏不可用时拒绝访问（fail-closed）；密钥永不回显 |
-
-**这些都是旁路增强。** 后端挂了或超时（默认 4 秒），DSH 照常工作，只是这一轮不注入。
-
-## 数据放在哪
-
-```
-~/.dsh/soulcore/
-  config.json          配置（设置页改的就是它；密钥也在这，权限 600）
-  persona.md           人设
-  data/memory.db       记忆库（SQLite + FTS5）
-  data/emotion.json    情绪状态（重启后接着上次的心情）
-  data/memory/         Markdown 镜像，按目录树归档，可以直接打开看
-    project/<工作目录名>/decisions.md
-    core/people/owner/notes.md
-    chat/qq/group/<群号>/...      （开启 QQ 接入后才有）
-```
-
-如果想改这个位置，设置环境变量 `SOULCORE_HOME`。
-
-## 记忆是怎么工作的（借鉴 LSTM 的门控）
-
-- **输入门**：每条记忆都有重要性分。寒暄打低分，"记住……"、决策、偏好打高分。
-- **遗忘门**：权重 `w = 重要性 × e^(-Δt/τ) × (1 + 0.3·ln(1+被检索次数))`。τ 按类型设定：闲聊 3 天、事实 2 个月、决策 1 年。被想起一次就重新计时。太弱的记忆转为冷存储，不删除。名字、生日、过敏这类**永久事实**（`pinned`）不衰减。
-- **输出门**：先搜当前项目，不够再逐级回退到父级、core，最后是全局。跨分支回退时还会按**可信度**（trust）过滤，见下面"隐私规则"。
-- **细胞状态**：冷掉的原始对话攒够 30 条，就合并成一条摘要。
-- **知识更新（v0.8）**：新旧记忆有两条时间轴——`created` 是"入库时间"，`valid_from` 是"这件事是什么时候说的"。"我搬家了，现在住在上海浦东"会取代"我住在北京海淀区"：旧条目不删除，只标 `invalid_at`，常规检索看不到，问"以前住哪"时还能翻出来，并且渲染成**（已过时）**。规则版冲突检测（`conflicts.py`）负责在没有 API Key 时也能识别"换导师/改型号/戒咖啡"这类更新；有 Key 时 LLM 会在同一次提炼里填 `replaces`，不额外花钱。
-- **时间感知检索（v0.8）**：问句里的"昨天 / 3天前 / 上周三 / 5号 / 最近"会解析成时间窗，落在窗内的条目不只加分，还会在查询没什么实词时**直接按时间取**。比如"昨天我们决定了什么"。
-- **冷存储回想（v0.8）**：转冷的条目在相关问题出现时可以"努力想起来"，够相关就拉回热存储、衰减计时归零；不相关就继续躺着。
-- **检索门控（v0.8）**："嗯嗯""好的"这类纯寒暄不检索（省一次 embedding，也不把不相干的旧事翻出来），沿用 10 分钟内上一轮的记忆。
-- **人格锚点（v0.8）**：每轮注入一两句"她是谁"（从人设卡的"性格 / 说话方式 / 语气"里自动摘，≤120 字），预算优先给它；她说了"作为一个AI""希望对你有帮助"这类助手腔，会记一条"最近注意"，下次提醒自己，72 小时后自动过期。
-
-**"被注入"算不算"被想起"？** 由 `memory.touch_mode` 决定：
-
-| 值 | 注入时 | 主动检索/回复里用到时 | 30 天模拟（seed 42 / 7） |
-|---|---|---|---|
-| `inject` | 刷新计时，访问次数 +1（v0.2 行为） | 同上 | 88.6% / 95.7% |
-| `recency`（默认） | 只刷新"多久没想起" | 刷新计时，访问次数 +1 | 88.6% / 94.3% |
-| `used` | 完全不刷新 | 刷新计时，访问次数 +1 | 90.0%（只跑了 seed 42） |
-
-同一随机种子下，`inject` 与 `recency` 最多差 1 题（70 题里），v0.2 与 v0.3 的 `inject` 完全相同。不固定种子时这一指标本身会在 88.6%–95.7% 之间波动——别拿单次运行比较版本。
-
-默认取 `recency`：它保留了"复习刷新计时"的效果，又去掉了"越被注入、重要性越高"的正反馈。`used` 最严格，但离线模拟里 MockLLM 的回复总会复述一条记忆，等于一直在"用到"，所以它在真实对话里的代价还没测准。
-
-隐私规则（有测试覆盖）：
-
-- 原始聊天只在本会话内可见，跨会话只会召回提炼过的条目。
-- 别人的私聊和人物档案永远查不到。
-- 项目记忆默认不会进 QQ 和 B站。
-- B站评论区是公开场景，看不到任何其他聊天分支。
-- 每条记忆带来源可信度：本地 DSH、主人的 QQ 私聊是 `owner`；白名单私聊、群里的熟人是 `known`；群里的陌生人是 `stranger`；B站评论区是 `public`。本地项目只召回 `owner` 的记忆，所以**群里陌生人说的"记住……"进不了编程 agent 的上下文**。主人在群里说的话仍算 `owner`。
-- 用户在 Markdown 里删掉的条目会留下墓碑，自动提炼不会把它写回来。
-
-### v0.8 新增的开关
-
-| 配置项 | 默认 | 作用 |
-|---|---|---|
-| `memory.auto_supersede` | `true` | 写入时做规则版冲突检测，新说法改了旧值时把旧条目标成"已过时" |
-| `memory.time_boost` | `2.0` | 落在问句时间窗内的条目得分倍数 |
-| `memory.cold_recall` | `true` | 正常检索没想起来时，再翻一次冷存储 |
-| `memory.cold_min_rel` | `0.45` | 冷条目要多相关才值得"想起来" |
-| `memory.gate_retrieval` | `true` | 寒暄不检索，沿用上一轮的记忆 |
-| `memory.extract_assistant_chars` | `300` | 发给提炼模型时，她自己的发言最多保留多少字 |
-| `memory.extract_user_chars` | `800` | 同上，对方的发言 |
-| `memory.segment_gap_min` | `30` | 两轮间隔超过多少分钟就当作一个话题段结束，先提炼前面的 |
-| `memory.reflect_every_h` | `20` | 多久收一次主人画像（还要至少有 3 条新变化） |
-| `persona.anchor` | `""` | 手动指定人格锚点；留空就从人设卡里自动摘 |
-| `persona.anchor_enabled` | `true` | 关掉后不注入锚点行 |
-| `persona.slip_ttl_h` | `72` | "最近注意"的保留小时数 |
-
-画像（`memory.reflect_every_h`）只在你自己的场景注入：本地 DSH 或你的 QQ 私聊。群聊、别人私信里看不到；低可信来源的批次也不能改写她的人设。
-
-### 已知局限（v0.8.1）
-
-- **锚点和画像每轮都追加在消息里**，所以平均注入比 v0.7 多了约 50%（200 天长记忆评测：441 → 662 字）。它们一天才变一次，下一版会挪进 JS 的 `systemPrompt.section` 吃提示缓存，每轮只留心情、提醒和检索结果。
-- **纯寒暄的注入没有变短**：门控省掉的是检索（和一次 embedding），但锚点、上一轮记忆仍然在，`eval_longmem` 里 `inject_chars_phatic` 比基线高 49%。这是"人设不漂"和"上下文更短"之间的取舍。
-- **冷存储回想要条目真的转冷**（约 186 天/事实）才有意义；刚过期但还没冷却的条目本来就能正常召回。
-
-## 情绪模型
-
-情绪值的范围是 (0, 1)，0 是悲伤，1 是开心，两端都到不了。计算过程：
-
-1. 事件和孤独感决定设定点。
-2. 设定点先经过前置滤波。
-3. PID 加情绪惯性让实际心情跟随设定点。
-4. 限速：每分钟最多变化 0.008。
-
-同一件事每次的冲击强度是随机抽样的（对数正态分布），所以同样被冷落，有时会"低落"，有时只是"有点闷"。实验和曲线图见 [`docs/emotion/`](docs/emotion)。
-
-## 可选：接入 QQ / B站
-
-QQ 用 **NapCat + 正向 WebSocket**：soulcore 主动连 NapCat，收发同一条连接，断线自动重连，也不用给 soulcore 固定端口。**全部在设置页里完成，不用改配置文件：**
-
-1. 装 NapCat，用**小号**扫码登录。
-2. 打开 NapCat WebUI（默认 `http://127.0.0.1:6099/webui`）→「网络配置」→ 新建「WebSocket 服务器」：Host `127.0.0.1`，端口 `3001`，消息格式 Array，设一个 Token，保存并启用。
-3. DSH「设置 → 人格与记忆 → QQ 接入」：填**你的 QQ 号**、地址 `ws://127.0.0.1:3001` 和 Token，点「测试连接」，看到"连上了：机器人 QQ xxx"后打开「启用 QQ」，保存设置。
-
-- **你的 QQ 号**：她会把这个号认成你，和 DSH 里的你共用 `core/people/owner` 这一份档案，私聊自动放行，QQ 私聊里也能聊起项目上的事；群里看不到项目记忆。
-- **常驻运行**：设置页点「安装常驻（开机自动启动）」，会注册一个登录 Windows 时自动启动的计划任务。这样 DSH 关了她也在线，DSH 打开时直接连上她，不会多开。已接入常驻进程时保存设置，会自动重启常驻进程让新配置生效。命令行等价操作：`python -m soulcore -c <config.json> install-service` / `uninstall-service` / `service-status`。
-- **单实例**：后端启动时先加锁再初始化，DSH 先读锁，能接入就不再起第二个进程。
-
-旧的 HTTP 上报（`transport: "http"`）仍然保留，只能通过编辑 `config.json` 使用。后端同时也是一个 B站轮询器（带人工审核队列，遇到风控码会立即暂停），在 `config.json` 里打开 `bilibili.enabled` 即可。
-
-### 在 QQ 里让她刷 B站
-
-需要装好 [dsh-bili-whale](../dsh-bili-whale)，并在 `config.json` 里打开 `qq.bili.enabled`。只用它的只读命令，不评论、不点赞、不收藏、不私信。
-
-| 你说 | 她会 |
-|---|---|
-| "最近刷到啥视频了" | 说出最近在首页刷到的视频（后台每 3 小时自己刷一次） |
-| "帮我在b站搜一下猫咪视频" | 当场去搜，挑几个结果说说（几秒钟） |
-| "看看第二个讲了啥" / "帮我看看《某视频》" | 先回一句"等我看看"，读完字幕后再主动发一条讲内容 |
-
-- **只在私聊里，只对你和白名单里的人。** 群里不帮人搜、不帮人看，免得谁都能用你的 B站账号发请求。
-- **每小时有上限**：默认搜 10 次、看 5 个视频（`qq.bili.search_per_hour` / `video_per_hour`），避免账号被风控。
-- **读字幕需要 B站登录有效。** 登录过期时，字幕接口会把所有视频都返回成"没有字幕"，她会照实说"登录过期了"。换 cookie：更新 `~/.bili-ai/credentials.json`，可以用 `node bili.mjs session` 检查。
-- **她看不到画面、听不到声音。** 没有字幕的视频只知道标题和简介。
-- **搜索结果和字幕都是公开内容**，只在当次聊天里用，不会进入你在 DSH 里的编程会话。
-
-注意：QQ/B站 场景下回复由后端自己调用 DeepSeek 生成，所以**必须填写 API Key**。
-
-详细说明见 [`docs/core.md`](docs/core.md)。请使用小号，在简介里声明是 AI，并遵守平台规则。
-
-### 主动聊天
-
-接好 QQ 后，在设置页「主动聊天」里打开「让她主动找你聊天」。她只给**你**发私聊，永远不主动发群。
-
-**她什么时候会找你：**
-
-| 念头 | 例子 |
-|---|---|
-| 跟进 | 你说过"明天下午三点答辩"，第二天 17 点后问你答辩怎么样 |
-| 接着聊 | 她上次问你的问题你一直没回，过几个小时再提起 |
-| 关心 | 23 点以后你还在 DSH 里写代码；或者连续忙了 3 个多小时 |
-| 分享 / 想你 | 心情特别好，或者很久没人理她 |
-
-**她什么时候不会打扰你：**
-- 勿扰时段内（默认 0:00–9:00）。
-- 你刚在 QQ 上和她聊过。
-- 你正在 DSH 里忙，这时只会发"关心"类的消息。
-- 上一条还在等你回。
-- 每天已经发够上限（默认 3 条），或者离上一条不到最小间隔（默认 3 小时）。
-
-**和情绪联动：**
-- 你回了，她会开心一点，也更愿意主动找你。
-- 你没回，她会低落一点，开口的概率减半。
-- 连续 2 条没回，就一直等你先开口。
-
-**试运行（默认开）：**
-- 只生成草稿，不真的发。草稿在设置页里看，可以发送或丢弃。
-- 点「让她现在想一想」可以立刻试一次。
-- 看满意了再关掉试运行。
-
-生成消息需要 DeepSeek API Key。
+- **所有数据都在本地**：`~/.dsh/soulcore/`（或 `SOULCORE_HOME`）下的 `memory.db`、Markdown 镜像、情绪状态；
+- 只有**提炼、摘要、画像**这几步会把**压缩后的对话片段**发给 DeepSeek（填了 key 才会发）；
+- **没填 key 时完全离线**：记忆用规则提炼，不联网；
+- 想删掉全部数据：直接删掉 `<home>` 目录；想删单条：`forget` 接口 / `/soulcore:memories` 命令 / 直接编辑 Markdown 镜像。
 
 ## 开发
 
 ```bash
-npm test                       # 14 个 JS 集成测试（用模拟的 Cordis ctx 驱动真实的 Python 后端）+ 172 个 Python 测试
-cd core && python -m unittest discover -s tests   # 只跑 Python 测试
-cd core && python -I bench/eval_longmem.py core ../docs/benchmark/longmem_v08.json   # 长记忆评测
-cd core && python -m soulcore --mock demo    # 离线演示：模拟一整天
-cd core && python -m soulcore --mock chat    # 命令行里直接和她聊（/skip 快进时间，/event 触发事件）
+npm test                                             # JS 集成测试 + Python 单元/集成测试
+cd core && python -m unittest discover -s tests      # 只跑 Python
+cd core && python -I bench/eval_longmem.py . ../docs/benchmark/longmem_v09.json --split-stable
+cd core && python -m soulcore --mock demo            # 离线演示：模拟一整天
+cd core && python -m soulcore --mock chat            # 命令行聊天（/skip 快进时间，/event 触发事件）
 ```
 
 目录：
 
 | 路径 | 内容 |
 |---|---|
-| `lib/index.js` | 宿主侧插件（Cordis） |
-| `lib/client.js` | 设置页 |
-| `lib/core-process.js` | 管理后端子进程：握手、Bearer token 鉴权、崩溃自动重启、跟随 DSH 退出 |
-| `core/soulcore/` | Python 后端（情绪、记忆、人格 prompt、HTTP 接口、QQ/B站适配） |
+| `lib/index.js` | DSH 宿主侧插件（Cordis） |
+| `lib/core-process.js` | 后端子进程：握手、Bearer token、崩溃重启、跟随 DSH 退出 |
+| `core/soulcore/` | Python 后端（情绪、记忆、人格 prompt、HTTP、MCP、Claude Code hook） |
+| `hooks/` `bin/` `.claude-plugin/` | Claude Code 插件打包 |
+| `docs/` | 上面那些文档 |
 
-兼容性：基于 DSH 0.2.1-rc.2 的插件接口开发。DSH 还处于开发者预览阶段，接口可能会变，遇到问题请提 issue。
+兼容性：DSH 插件基于 DSH 0.2.1-rc.2 的接口开发（DSH 还在开发者预览阶段，接口可能变）；
+Claude Code 部分按 2026 年 11 月的 hooks / plugins / MCP 官方文档实现。遇到问题请提 issue。
 
 ## License
 
