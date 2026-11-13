@@ -49,6 +49,26 @@ def stricter(a: str, b: str) -> str:
     """两个来源合并时取更不可信的那个——合并不会让内容变得更可信。"""
     return a if TRUST_RANK.get(a, 0) <= TRUST_RANK.get(b, 0) else b
 
+
+def atomic_write(path: str, text: str, retries: int = 5) -> None:
+    """原子写文件：先写 `.tmp`，再 `os.replace` 换过去。
+
+    直接 `open(...,"w")` 会在截断的瞬间被别的线程读到半个文件；Windows 上杀毒软件和
+    索引服务还会短暂占用目标文件，`os.replace` 偶发 `PermissionError`。重试几次就过去了，
+    实在写不进去才抛给调用方（Markdown 镜像丢了还能从数据库重建，数据库丢了才是真丢）。
+    """
+    tmp = path + ".tmp"
+    for i in range(max(1, int(retries))):
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(text)
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i >= retries - 1:
+                raise
+            time.sleep(0.05)
+
 DEFAULT_TAU_HOURS = {
     "turn": 72,            # 原始对话：3 天
     "fact": 24 * 60,       # 事实：2 个月
@@ -168,6 +188,11 @@ class MemoryStore:
         self.group_turn_tau_scale = cfg.get("group_turn_tau_scale", 0.5)
         self.auto_supersede = cfg.get("auto_supersede", True)
         self.time_boost = float(cfg.get("time_boost", 2.0))
+        # Markdown 镜像的锁：所有"读 → 改 → os.replace"都必须串行，否则后台提炼线程、
+        # tick 线程、HTTP 线程并发写同一个 notes.md 时会互相覆盖，被覆盖的行下一轮
+        # sync_markdown() 会判成"用户删了"，直接丢记忆。
+        # 锁顺序固定为 **先 md_lock 后 self.lock**（self.lock 也保护 sqlite 连接）。
+        self.md_lock = threading.RLock()
         self.lock = threading.RLock()
         self.db = sqlite3.connect(os.path.join(data_dir, "memory.db"), check_same_thread=False)
         self.db.row_factory = sqlite3.Row
@@ -680,15 +705,17 @@ class MemoryStore:
         """把某个分支下的条目迁到新路径（人物档案合并用）。返回迁移条数。"""
         if not old or old == new:
             return 0
-        with self.lock:
-            rows = self.db.execute("SELECT id FROM items WHERE path=? OR path LIKE ?",
-                                   (old, old + "/%")).fetchall()
-            if not rows:
-                return 0
-            self.db.execute("UPDATE items SET path=? WHERE path=?", (new, old))
-            self.db.execute("UPDATE items SET path=? || substr(path, ?) WHERE path LIKE ?",
-                            (new, len(old) + 1, old + "/%"))
-            self.db.commit()
+        # 锁顺序：先 md_lock 再 self.lock（见 __init__ 的说明）
+        with self.md_lock:
+            with self.lock:
+                rows = self.db.execute("SELECT id FROM items WHERE path=? OR path LIKE ?",
+                                       (old, old + "/%")).fetchall()
+                if not rows:
+                    return 0
+                self.db.execute("UPDATE items SET path=? WHERE path=?", (new, old))
+                self.db.execute("UPDATE items SET path=? || substr(path, ?) WHERE path LIKE ?",
+                                (new, len(old) + 1, old + "/%"))
+                self.db.commit()
             # Markdown 镜像也要跟着搬：否则新目录的 notes.md 里没有这些行，
             # 下次 sync_markdown() 会把迁过来的条目当成"用户删掉了"（标 deleted + 墓碑）
             self._move_mirror(old, new, [r["id"] for r in rows])
@@ -696,52 +723,59 @@ class MemoryStore:
 
     def _move_mirror(self, old: str, new: str, ids: list[int]) -> None:
         NL = "\n"
-        src_root = os.path.join(self.md_root, *old.split("/"))
-        if os.path.isdir(src_root):
-            for d, _, files in os.walk(src_root, topdown=False):
-                rel = os.path.relpath(d, src_root)
-                dst = os.path.join(self.md_root, *new.split("/"), *([] if rel == "." else [rel]))
-                os.makedirs(dst, exist_ok=True)
-                for fn in files:
-                    if fn.endswith(".tmp"):
-                        continue
-                    sp, tp = os.path.join(d, fn), os.path.join(dst, fn)
-                    with open(sp, encoding="utf-8") as f:
-                        text = f.read()
-                    if os.path.exists(tp):
-                        with open(tp, encoding="utf-8") as f:
-                            cur = f.read()
-                        text = cur + ("" if not cur or cur.endswith(NL) else NL) + text
-                    tmp = tp + ".tmp"
-                    with open(tmp, "w", encoding="utf-8") as f:
-                        f.write(text)
-                    os.replace(tmp, tp)
-                    os.remove(sp)
-                try:
-                    os.rmdir(d)
-                except OSError:
-                    pass
-        # 数据库里有、但 Markdown 里没有对应行的条目（比如当初写入时没镜像），补一行，
-        # 保证同步时不会被误判为"已删除"
-        if not ids:
-            return
-        rows = self.db.execute(
-            "SELECT * FROM items WHERE id IN (%s) AND kind!='turn' AND status NOT IN ('merged','deleted')"
-            % ",".join("?" * len(ids)), tuple(ids)).fetchall()
-        cache: dict[str, str] = {}
-        for r in rows:
-            fn = os.path.join(self.md_root, *r["path"].split("/"), self._md_name(r["kind"]))
-            if fn not in cache:
-                try:
-                    with open(fn, encoding="utf-8") as f:
-                        cache[fn] = f.read()
-                except OSError:
-                    cache[fn] = ""
-            if re.search(r"<!--\s*id=%d(?!\d)" % r["id"], cache[fn]):
-                continue
-            self._mirror(r["path"], r["kind"], r["content"], r["id"], r["importance"],
-                         r["speaker"], r["role"], r["created"])
-            cache[fn] += "<!-- id=%d -->" % r["id"]
+        with self.md_lock:
+            src_root = os.path.join(self.md_root, *old.split("/"))
+            if os.path.isdir(src_root):
+                for d, _, files in os.walk(src_root, topdown=False):
+                    rel = os.path.relpath(d, src_root)
+                    dst = os.path.join(self.md_root, *new.split("/"), *([] if rel == "." else [rel]))
+                    os.makedirs(dst, exist_ok=True)
+                    for fn in files:
+                        if fn.endswith(".tmp"):
+                            continue
+                        sp, tp = os.path.join(d, fn), os.path.join(dst, fn)
+                        try:
+                            with open(sp, encoding="utf-8") as f:
+                                text = f.read()
+                        except OSError:
+                            continue
+                        if os.path.exists(tp):
+                            try:
+                                with open(tp, encoding="utf-8") as f:
+                                    cur = f.read()
+                            except OSError:
+                                cur = ""
+                            text = cur + ("" if not cur or cur.endswith(NL) else NL) + text
+                        atomic_write(tp, text)
+                        try:
+                            os.remove(sp)
+                        except OSError:
+                            pass
+                    try:
+                        os.rmdir(d)
+                    except OSError:
+                        pass
+            # 数据库里有、但 Markdown 里没有对应行的条目（比如当初写入时没镜像），补一行，
+            # 保证同步时不会被误判为"已删除"
+            if not ids:
+                return
+            rows = self.db.execute(
+                "SELECT * FROM items WHERE id IN (%s) AND kind!='turn' AND status NOT IN ('merged','deleted')"
+                % ",".join("?" * len(ids)), tuple(ids)).fetchall()
+            cache: dict[str, str] = {}
+            for r in rows:
+                fn = os.path.join(self.md_root, *r["path"].split("/"), self._md_name(r["kind"]))
+                if fn not in cache:
+                    try:
+                        with open(fn, encoding="utf-8") as f:
+                            cache[fn] = f.read()
+                    except OSError:
+                        cache[fn] = ""
+                if re.search(r"<!--\s*id=%d(?!\d)" % r["id"], cache[fn]):
+                    continue
+                self._mirror(r["path"], r["kind"], r["content"], r["id"], r["importance"],
+                             r["speaker"], r["role"], r["created"])
+                cache[fn] += "<!-- id=%d -->" % r["id"]
 
     # ================= 遗忘门：维护 =================
     def maintain(self) -> dict:
@@ -865,57 +899,60 @@ class MemoryStore:
         return stats
 
     def _sync_file(self, full: str, path: str, kinds: tuple, now: float, stats: dict) -> None:
-        with open(full, encoding="utf-8") as f:
-            lines = f.read().split("\n")
-        seen: set[int] = set()
-        changed_file = False
-        with self.lock:
-            for li, line in enumerate(lines):
-                m = self._MD_LINE.match(line)
-                if not m or not m.group(3).strip():
-                    continue
-                prefix, kind, content, _, iid = m.groups()
-                content = content.strip()
-                kind = kind if kind in DEFAULT_TAU_HOURS and kind != "turn" else kinds[0]
-                if iid:
-                    iid = int(iid); seen.add(iid)
-                    r = self.db.execute("SELECT * FROM items WHERE id=? AND path=?", (iid, path)).fetchone()
-                    if r is None:
+        # 读文件、比对数据库、写回文件整段持有 md_lock：中途别的线程追加一行，
+        # 会被这里基于旧快照的写回覆盖掉，然后下一轮同步又把它判成"用户删了"
+        with self.md_lock:
+            try:
+                with open(full, encoding="utf-8") as f:
+                    lines = f.read().split("\n")
+            except OSError:
+                return
+            seen: set[int] = set()
+            changed_file = False
+            with self.lock:
+                for li, line in enumerate(lines):
+                    m = self._MD_LINE.match(line)
+                    if not m or not m.group(3).strip():
                         continue
-                    if r["content"] != content or r["kind"] != kind or r["status"] == "deleted":
-                        self.db.execute("UPDATE items SET content=?, kind=?, status='hot', last_access=? WHERE id=?",
-                                        (content, kind, now, iid))
-                        self.db.execute("DELETE FROM items_fts WHERE rowid=?", (iid,))
-                        self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)",
-                                        (iid, index_text(content + " " + (r["tags"] or ""))))
-                        self.db.execute("DELETE FROM vecs WHERE id=?", (iid,))
-                        stats["updated"] += 1
-                else:
-                    cur = self.db.execute(
-                        "INSERT INTO items(path,kind,role,speaker,content,importance,tau_h,created,last_access,tags)"
-                        " VALUES(?,?,?,?,?,?,?,?,?,?)",
-                        (path, kind, "", "", content, 0.85, float(self.tau.get(kind, 72)), now, now, "manual"))
-                    new_id = cur.lastrowid; seen.add(new_id)
-                    self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)", (new_id, index_text(content + " manual")))
-                    lines[li] = f"{prefix}[{kind}] {content}  <!-- id={new_id} imp=0.85 {time.strftime('%Y-%m-%d', time.localtime(now))} manual -->"
-                    changed_file = True
-                    stats["added"] += 1
-            q = ("SELECT id, content FROM items WHERE path=? AND kind IN (%s) "
-                 "AND status NOT IN ('merged','deleted') AND created < ?" % ",".join("?" * len(kinds)))
-            gone = [(r["id"], r["content"]) for r in self.db.execute(q, (path, *kinds, now - 5))
-                    if r["id"] not in seen]
-            if gone:
-                for _iid, content in gone:
-                    self.add_tombstone(content)      # 用户删掉的，自动提炼不再复活
-                self.db.executemany("UPDATE items SET status='deleted' WHERE id=?",
-                                    [(i,) for i, _ in gone])
-                stats["deleted"] += len(gone)
-            self.db.commit()
-        if changed_file:
-            tmp = full + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-            os.replace(tmp, full)
+                    prefix, kind, content, _, iid = m.groups()
+                    content = content.strip()
+                    kind = kind if kind in DEFAULT_TAU_HOURS and kind != "turn" else kinds[0]
+                    if iid:
+                        iid = int(iid); seen.add(iid)
+                        r = self.db.execute("SELECT * FROM items WHERE id=? AND path=?", (iid, path)).fetchone()
+                        if r is None:
+                            continue
+                        if r["content"] != content or r["kind"] != kind or r["status"] == "deleted":
+                            self.db.execute("UPDATE items SET content=?, kind=?, status='hot', last_access=? WHERE id=?",
+                                            (content, kind, now, iid))
+                            self.db.execute("DELETE FROM items_fts WHERE rowid=?", (iid,))
+                            self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)",
+                                            (iid, index_text(content + " " + (r["tags"] or ""))))
+                            self.db.execute("DELETE FROM vecs WHERE id=?", (iid,))
+                            stats["updated"] += 1
+                    else:
+                        cur = self.db.execute(
+                            "INSERT INTO items(path,kind,role,speaker,content,importance,tau_h,created,last_access,tags)"
+                            " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                            (path, kind, "", "", content, 0.85, float(self.tau.get(kind, 72)), now, now, "manual"))
+                        new_id = cur.lastrowid; seen.add(new_id)
+                        self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)", (new_id, index_text(content + " manual")))
+                        lines[li] = f"{prefix}[{kind}] {content}  <!-- id={new_id} imp=0.85 {time.strftime('%Y-%m-%d', time.localtime(now))} manual -->"
+                        changed_file = True
+                        stats["added"] += 1
+                q = ("SELECT id, content FROM items WHERE path=? AND kind IN (%s) "
+                     "AND status NOT IN ('merged','deleted') AND created < ?" % ",".join("?" * len(kinds)))
+                gone = [(r["id"], r["content"]) for r in self.db.execute(q, (path, *kinds, now - 5))
+                        if r["id"] not in seen]
+                if gone:
+                    for _iid, content in gone:
+                        self.add_tombstone(content)      # 用户删掉的，自动提炼不再复活
+                    self.db.executemany("UPDATE items SET status='deleted' WHERE id=?",
+                                        [(i,) for i, _ in gone])
+                    stats["deleted"] += len(gone)
+                self.db.commit()
+            if changed_file:
+                atomic_write(full, "\n".join(lines))
         if self.embedder is not None:
             self.backfill_embeddings()
 
@@ -928,7 +965,6 @@ class MemoryStore:
 
     def _mirror(self, path, kind, content, iid, imp, speaker, role, ts) -> None:
         d = os.path.join(self.md_root, *path.split("/"))
-        os.makedirs(d, exist_ok=True)
         tm = time.localtime(ts)
         if kind == "turn":
             fn = os.path.join(d, time.strftime("%Y-%m", tm) + ".md")
@@ -937,8 +973,12 @@ class MemoryStore:
         else:
             fn = os.path.join(d, self._md_name(kind))
             line = f"- [{kind}] {content.replace(chr(10), ' ')}  <!-- id={iid} imp={imp:.2f} {time.strftime('%Y-%m-%d', tm)} -->\n"
-        with open(fn, "a", encoding="utf-8") as f:
-            f.write(line)
+        # 追加本身不需要原子写（一行一次 write），但要和"读 → 改 → 替换"的调用方串行，
+        # 否则改写方基于旧快照写回时会把刚追加的行吞掉
+        with self.md_lock:
+            os.makedirs(d, exist_ok=True)
+            with open(fn, "a", encoding="utf-8") as f:
+                f.write(line)
 
     def _annotate_mirror_line(self, path, kind, iid, note) -> bool:
         """在 Markdown 镜像那一行的 id 注释末尾追加标记（不改正文）。
@@ -949,29 +989,27 @@ class MemoryStore:
         if kind == "turn":
             return False
         fn = os.path.join(self.md_root, *path.split("/"), self._md_name(kind))
-        if not os.path.exists(fn):
-            return False
-        try:
-            with open(fn, encoding="utf-8") as f:
-                lines = f.read().split("\n")
-        except OSError:
-            return False
-        pat = re.compile(r"(<!--\s*id=%d(?=[^>]*-->)[^>]*?)(\s*-->)" % int(iid))
-        out, changed = [], False
-        for line in lines:
-            if iid and note not in line and re.search(r"<!--\s*id=%d(?!\d)" % int(iid), line):
-                new = pat.sub(lambda m: f"{m.group(1)} {note}{m.group(2)}", line, count=1)
-                if new != line:
-                    changed = True
-                    line = new
-            out.append(line)
-        if not changed:
-            return False
-        tmp = fn + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write("\n".join(out))
-        os.replace(tmp, fn)
-        return True
+        with self.md_lock:
+            if not os.path.exists(fn):
+                return False
+            try:
+                with open(fn, encoding="utf-8") as f:
+                    lines = f.read().split("\n")
+            except OSError:
+                return False
+            pat = re.compile(r"(<!--\s*id=%d(?=[^>]*-->)[^>]*?)(\s*-->)" % int(iid))
+            out, changed = [], False
+            for line in lines:
+                if iid and note not in line and re.search(r"<!--\s*id=%d(?!\d)" % int(iid), line):
+                    new = pat.sub(lambda m: f"{m.group(1)} {note}{m.group(2)}", line, count=1)
+                    if new != line:
+                        changed = True
+                        line = new
+                out.append(line)
+            if not changed:
+                return False
+            atomic_write(fn, "\n".join(out))
+            return True
 
     def _rewrite_mirror_line(self, path, kind, iid, content, imp, ts) -> bool:
         """去重合并后，把 Markdown 里对应的那一行改成新内容。
@@ -981,30 +1019,28 @@ class MemoryStore:
         if kind == "turn":
             return False
         fn = os.path.join(self.md_root, *path.split("/"), self._md_name(kind))
-        if not os.path.exists(fn):
-            return False
-        try:
-            with open(fn, encoding="utf-8") as f:
-                lines = f.read().split("\n")
-        except OSError:
-            return False
-        out, changed = [], False
-        for line in lines:
-            m = self._MD_LINE.match(line)
-            if m and m.group(5) and int(m.group(5)) == int(iid):
-                prefix = m.group(1)
-                out.append(f"{prefix}[{kind}] {content}  "
-                           f"<!-- id={iid} imp={imp:.2f} {time.strftime('%Y-%m-%d', time.localtime(ts))} -->")
-                changed = True
-            else:
-                out.append(line)
-        if not changed:
-            return False
-        tmp = fn + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write("\n".join(out))
-        os.replace(tmp, fn)
-        return True
+        with self.md_lock:
+            if not os.path.exists(fn):
+                return False
+            try:
+                with open(fn, encoding="utf-8") as f:
+                    lines = f.read().split("\n")
+            except OSError:
+                return False
+            out, changed = [], False
+            for line in lines:
+                m = self._MD_LINE.match(line)
+                if m and m.group(5) and int(m.group(5)) == int(iid):
+                    prefix = m.group(1)
+                    out.append(f"{prefix}[{kind}] {content}  "
+                               f"<!-- id={iid} imp={imp:.2f} {time.strftime('%Y-%m-%d', time.localtime(ts))} -->")
+                    changed = True
+                else:
+                    out.append(line)
+            if not changed:
+                return False
+            atomic_write(fn, "\n".join(out))
+            return True
 
     def close(self):
         with self.lock:
