@@ -53,6 +53,9 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
             return json.loads(self.rfile.read(n).decode() or "{}") if n else {}
 
         def do_GET(self):
+            touch = ctl.get("touch")
+            if touch is not None:
+                touch()
             u = urlparse(self.path); qs = parse_qs(u.query)
             if not self._auth(qs):
                 return self._send(401, {"error": "unauthorized"})
@@ -91,6 +94,9 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
             return self._send(404, {"error": "not found"})
 
         def do_POST(self):
+            touch = ctl.get("touch")
+            if touch is not None:
+                touch()
             u = urlparse(self.path); qs = parse_qs(u.query)
             if not self._auth(qs):
                 # 先把请求体读掉再回 401：否则 Windows 上客户端看到的是"连接被重置"而不是 401
@@ -202,11 +208,13 @@ def bind_http_server(host: str, port: int, handler, attempts: int = 10) -> Threa
 
 
 def serve(engine, cfg: dict, block: bool = True, lock_path: str | None = None,
-          version: str = __version__, lock=None):
+          version: str = __version__, lock=None, idle_exit_min: float = 0):
     """启动 HTTP 服务。
 
     lock_path：单实例锁文件。抢不到锁说明已经有实例在跑，直接打印信息后退出（返回 None）。
     version：写进锁文件，DSH 接入时用来判断"锁里是不是旧版本的后端"。
+    idle_exit_min：多少分钟没有任何请求就优雅退出（0=不退出）。Claude Code 拉起的后端传 240，
+                   免得不用 DSH 的人机器上永远挂着一个进程。
     """
     scfg = cfg.get("server", {})
     onebot = None
@@ -289,6 +297,22 @@ def serve(engine, cfg: dict, block: bool = True, lock_path: str | None = None,
     threads.append(threading.Thread(target=initiative_loop, daemon=True, name="initiative"))
     # 在另一个线程里调 shutdown()：serve_forever 所在线程返回后走下面 finally 的清理（释放锁、关库）
     ctl["shutdown"] = lambda: threading.Thread(target=httpd.shutdown, daemon=True, name="shutdown").start()
+    if idle_exit_min and float(idle_exit_min) > 0:
+        last = [time.time()]
+        ctl["last"] = last
+
+        def touch():
+            last[0] = time.time()
+        ctl["touch"] = touch
+
+        def idle_loop():
+            limit = float(idle_exit_min) * 60
+            while not stop.wait(min(30.0, max(1.0, limit / 4))):
+                if time.time() - last[0] >= limit:
+                    log.info("soulcore 空闲 %.0f 分钟没有请求，自动退出", limit / 60)
+                    ctl["shutdown"]()
+                    return
+        threads.append(threading.Thread(target=idle_loop, daemon=True, name="idle-exit"))
     port = httpd.server_address[1]
     if lock is not None:
         lock.write({"pid": os.getpid(), "port": port, "token": token,

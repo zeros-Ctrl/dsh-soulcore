@@ -3,13 +3,14 @@ from __future__ import annotations
 import argparse, json, logging, os, sys, time
 
 from .config import load_config
+from .client import resolve_home
 from .events import Event
 from .emotion import EVENTS, EVENT_CN
 
 
 def _engine(args, clock=time.time):
     from .engine import Engine
-    cfg, base = load_config(args.config)
+    cfg, base = load_config(_config_path(args))
     if getattr(args, "data", None):
         cfg["data_dir"] = os.path.abspath(args.data)
     return Engine(cfg, base, mock=args.mock, clock=clock), cfg
@@ -85,7 +86,7 @@ def cmd_chat(args):
 
 def _lock_path(args) -> str:
     """锁文件放在配置文件旁边（soulcore home），和 data_dir 无关。"""
-    cfg_path = os.path.abspath(args.config)
+    cfg_path = _config_path(args)
     return os.path.join(os.path.dirname(cfg_path), "soulcore.lock")
 
 
@@ -104,14 +105,15 @@ def _probe(info: dict | None, timeout: float = 1.5) -> bool:
 
 
 def _config_path(args) -> str:
-    """命令行给的配置；没给/不存在时回落到 SOULCORE_HOME（或 ~/.dsh/soulcore）里的 config.json。"""
+    """命令行给的配置；没给/不存在时回落到 resolve_home() 里的 config.json。
+
+    resolve_home() 会顺便建目录、写默认配置和人设模板，所以第一次用 Claude Code /
+    MCP 时不至于因为"没有配置文件"直接报错。
+    """
     p = os.path.abspath(args.config)
     if os.path.exists(p):
         return p
-    env = os.environ.get("SOULCORE_HOME")
-    home = env or os.path.join(os.path.expanduser("~"), ".dsh", "soulcore")
-    alt = os.path.join(home, "config.json")
-    return alt if os.path.exists(alt) else p
+    return os.path.join(resolve_home(), "config.json")
 
 
 def cmd_serve(args):
@@ -137,7 +139,8 @@ def cmd_serve(args):
         raise
     if args.port is not None:
         cfg["server"]["port"] = args.port
-    if serve(eng, cfg, lock_path=lock_path, version=__version__, lock=lock) is None:
+    if serve(eng, cfg, lock_path=lock_path, version=__version__, lock=lock,
+             idle_exit_min=args.idle_exit_min) is None:
         eng.close()
 
 
@@ -242,6 +245,8 @@ def main(argv=None):
     c.set_defaults(fn=cmd_chat)
     s = sub.add_parser("serve", help="启动 HTTP 钩子服务（含 QQ 上报入口、B站轮询）")
     s.add_argument("--port", type=int)
+    s.add_argument("--idle-exit-min", type=float, default=0.0,
+                   help="空闲多少分钟后自动退出（0=不退出；Claude Code 拉起的后端用 240）")
     s.set_defaults(fn=cmd_serve)
     sub.add_parser("review", help="审核 B站待发回复").set_defaults(fn=cmd_review)
     b = sub.add_parser("bili", help="单独运行 B站轮询")
