@@ -1,0 +1,17 @@
+{
+  "name": "dsh-soulcore",
+  "description": "soulcore：给 AI 编程助手加上跨会话长期记忆和稳定人格（纯本地、零依赖）。",
+  "owner": {
+    "name": "zeros-Crtl",
+    "email": "2735527994@qq.com"
+  },
+  "plugins": [
+    {
+      "name": "soulcore",
+      "source": "./",
+      "description": "跨会话长期记忆 + 稳定人格：SessionStart 注入项目关键决策，每轮提示词召回相关记忆，Stop 把回复写回记忆。附带 6 个 MCP 工具和 /soulcore:* 命令。",
+      "category": "productivity",
+      "tags": ["memory", "long-term-memory", "mcp", "hooks", "persona"]
+    }
+  ]
+}

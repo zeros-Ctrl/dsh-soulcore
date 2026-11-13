@@ -1,0 +1,37 @@
+#!/bin/sh
+# soulcore MCP server 启动器：找一个 Python ≥ 3.10 并 exec 上去。
+# MCP 的 stdout 是协议通道，这里除了错误信息（stderr）什么都不能打印。
+set -u
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+PY=""
+PY_EXTRA=""
+
+try_python() {
+  command -v "$1" >/dev/null 2>&1 || [ -x "$1" ] || return 1
+  "$1" ${2:-} -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1 || return 1
+  PY="$1"
+  PY_EXTRA=${2:-}
+  return 0
+}
+
+[ -n "${SOULCORE_PYTHON:-}" ] && try_python "$SOULCORE_PYTHON"
+[ -z "$PY" ] && try_python python3
+[ -z "$PY" ] && try_python python
+[ -z "$PY" ] && try_python py -3
+HOME_DIR=${HOME:-${USERPROFILE:-}}
+if [ -z "$PY" ] && [ -n "$HOME_DIR" ]; then
+  for cand in "$HOME_DIR"/.dsh/dsh-runtimes/*/dependencies/python/python.exe \
+              "$HOME_DIR"/.dsh/dsh-runtimes/*/dependencies/python/bin/python3; do
+    [ -x "$cand" ] || continue
+    if try_python "$cand"; then break; fi
+  done
+fi
+
+if [ -z "$PY" ]; then
+  echo "soulcore-mcp: 找不到 Python 3.10+。请安装 Python 3.10+，或用 SOULCORE_PYTHON 指定解释器路径。" >&2
+  exit 1
+fi
+
+exec "$PY" $PY_EXTRA -I "$ROOT/core/run.py" mcp

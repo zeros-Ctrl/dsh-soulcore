@@ -1,2 +1,5 @@
 * text=auto eol=lf
 *.png binary
+
+bin/soulcore-hook text eol=lf
+bin/soulcore-mcp text eol=lf

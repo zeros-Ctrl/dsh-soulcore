@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "soulcore": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/soulcore-mcp",
+      "args": []
+    }
+  }
+}

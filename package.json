@@ -1,11 +1,22 @@
-﻿{
+{
   "name": "dsh-soulcore",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "给 DeepSeek Harness 的 agent 一个独立人格：PID 平滑的概率情绪 + LSTM 门控式分层长期记忆（按项目/会话归档，压缩前自动提炼落盘），可选接入 QQ(OneBot v11) 与 B站。",
-  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "persona", "memory", "emotion", "long-term-memory"],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "persona",
+    "memory",
+    "emotion",
+    "long-term-memory"
+  ],
   "author": "zeros-Crtl <2735527994@qq.com>",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/zeros-Crtl/dsh-soulcore.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zeros-Crtl/dsh-soulcore.git"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -13,14 +24,35 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
-  "files": ["lib", "core/soulcore", "core/run.py", "core/persona.example.md", "core/config.example.json", "cordis.patch.yml", "README.md", "LICENSE", "CHANGELOG.md"],
+  "files": [
+    "lib",
+    "core/soulcore",
+    "core/run.py",
+    "core/persona.example.md",
+    "core/config.example.json",
+    "cordis.patch.yml",
+    "hooks",
+    "bin",
+    "commands",
+    ".claude-plugin",
+    ".mcp.json",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "test": "node --test tests/plugin.test.mjs tests/plugin-stable.test.mjs && cd core && python -m unittest discover -s tests",
     "test:js": "node --test tests/plugin.test.mjs tests/plugin-stable.test.mjs",
     "test:py": "cd core && python -m unittest discover -s tests"
   },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
-    "client": { "inject": [], "platform": "web" }
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
   }
 }
