@@ -43,6 +43,10 @@ DEFAULTS = {
                  "poll_interval_s": 90, "reply_at": True, "reply_replies": True, "dm_whitelist": [],
                  "auto_send": False, "comment_min_interval_s": 15, "comment_max_per_hour": 20,
                  "dm_min_interval_s": 10, "dm_max_per_hour": 20},
+    # Claude Code：hook 注入什么、写不写回复。
+    #   style=memory     只给跨会话记忆（默认，面向写代码的）
+    #   style=companion  完整人格（心情/锚点/画像），和 DSH 体验一致
+    "cc": {"enabled": True, "style": "memory", "inject_max_chars": 900, "record_replies": True},
 }
 
 

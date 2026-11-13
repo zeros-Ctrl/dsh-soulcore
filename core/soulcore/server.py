@@ -90,7 +90,9 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                     limit = int(qs.get("limit", ["20"])[0])
                 except ValueError:
                     limit = 20
-                return self._send(200, engine.store.timeline(limit, qs.get("path", [""])[0] or None))
+                top = qs.get("top", ["0"])[0].lower() in ("1", "true", "yes", "importance")
+                return self._send(200, engine.store.timeline(
+                    limit, qs.get("path", [""])[0] or None, top=top))
             return self._send(404, {"error": "not found"})
 
         def do_POST(self):

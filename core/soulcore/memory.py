@@ -711,10 +711,11 @@ class MemoryStore:
                 "invalid_at": r["invalid_at"], "superseded_by": r["superseded_by"],
                 "stale_note": r["stale_note"]}
 
-    def timeline(self, limit: int = 20, path: str | None = None) -> dict:
+    def timeline(self, limit: int = 20, path: str | None = None, top: bool = False) -> dict:
         """最近的记忆：新增的（recent）和刚被取代的（superseded，带旧值/新值）。
 
         只列提炼过的条目（turn 是原始对话流水，不是"记忆"）；被合并进摘要的不列。
+        top=True 时按 importance 排序（"最重要的 5 条决策"用），否则按时间。
         """
         try:
             limit = max(1, min(int(limit or 20), 200))
@@ -725,10 +726,11 @@ class MemoryStore:
         if path:
             cond += " AND (path=? OR path LIKE ?)"
             args = [path, path + "/%"]
+        order = "importance DESC, created DESC, id DESC" if top else "created DESC, id DESC"
         with self.lock:
             recent = [self.brief(r) for r in self.db.execute(
                 f"SELECT * FROM items WHERE {cond} AND invalid_at IS NULL "
-                "ORDER BY created DESC, id DESC LIMIT ?", (*args, limit)).fetchall()]
+                f"ORDER BY {order} LIMIT ?", (*args, limit)).fetchall()]
             rows = self.db.execute(
                 f"SELECT * FROM items WHERE {cond} AND invalid_at IS NOT NULL AND superseded_by IS NOT NULL "
                 "ORDER BY invalid_at DESC, id DESC LIMIT ?", (*args, limit)).fetchall()

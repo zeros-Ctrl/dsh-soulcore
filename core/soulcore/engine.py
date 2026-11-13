@@ -23,7 +23,7 @@ from .extractor import (extract_full, summarize, turn_importance, worth_extracti
 from .conflicts import core_text
 from .timeparse import query_window, wants_history
 from .persona import (load_card, build_system, build_context_block, make_anchor, detect_slips,
-                      render_stable)
+                      render_stable, _ago)
 from .stickers import StickerLib, prompt_hint
 
 log = logging.getLogger("soulcore")
@@ -616,6 +616,13 @@ class Engine:
             # 寒暄轮再注入一遍同样的记忆纯属浪费，只留心情和亲密度。
             mems = []
             person = []
+        if (style or "").lower() == "memory":
+            # Claude Code 的 memory 风格：只给跨会话记忆，不带心情/好感/锚点/画像
+            text = self._memory_style_text(mems)
+            self.cost["inject_chars_total"] += len(text)
+            self.cost["inject_count"] += 1
+            return {"text": text, "mood": ctx["mood"], "label": ctx["label"],
+                    "memories": ctx["memories"]}
         text = build_context_block(self.name, ctx["mood_text"], rel, mems, person, self.clock(),
                                    self.mcfg.get("inject_max_chars", 1600), anchor=self.anchor,
                                    slips=self._slips(), profile_owner=profile_owner,
@@ -624,6 +631,27 @@ class Engine:
         self.cost["inject_count"] += 1
         return {"text": text, "mood": ctx["mood"], "label": ctx["label"],
                 "memories": ctx["memories"] if mems else []}
+
+    def _memory_style_text(self, mems) -> str:
+        """memory 风格：只有 `- decision·3天前：…` 这种行，程序员一眼能读懂。
+
+        超预算就从最不相关的开始砍（mems 已经按相关度排好序）。
+        """
+        budget = min(int(self.mcfg.get("inject_max_chars", 1600)),
+                     int((self.cfg.get("cc") or {}).get("inject_max_chars", 900) or 900))
+        if not mems:
+            return ""
+        lines = ["[soulcore·相关记忆]"]
+        n = len(lines[0])
+        for it in mems:
+            t = it.valid_from if it.valid_from is not None else it.created
+            stale = "（已过时）" if it.invalid_at else ""
+            line = f"- {it.kind}·{_ago(self.clock() - t)}：{stale}{it.content}"
+            if n + len(line) > budget:
+                break
+            lines.append(line)
+            n += len(line)
+        return "\n".join(lines) if len(lines) > 1 else ""
 
     def remember(self, ev: Event, content: str, kind: str = "fact", importance: float = 0.85) -> int | None:
         """模型通过工具主动记住某事。这是主人授意的写入：绕过墓碑，可信度仍按来源算。"""

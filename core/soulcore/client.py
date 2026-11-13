@@ -196,7 +196,8 @@ class Backend:
         cmd = [py, "-I", RUN_PY, "--config", cfg]
         if self.mock:
             cmd.append("--mock")
-        cmd += ["serve"]
+        # 一定要随机端口：固定 8765 会和用户已有的常驻后端 / DSH 抢端口
+        cmd += ["serve", "--port", "0"]
         if self.idle_exit_min > 0:
             cmd += ["--idle-exit-min", str(self.idle_exit_min)]
         env = {

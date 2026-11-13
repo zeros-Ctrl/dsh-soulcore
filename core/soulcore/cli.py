@@ -221,6 +221,12 @@ def cmd_state(args):
     eng.close()
 
 
+def cmd_cc_hook(args):
+    """Claude Code hook：从 stdin 读 JSON，失败即放行（永远 exit 0）"""
+    from .cc_hook import main as hook_main
+    sys.exit(hook_main(args.event))
+
+
 def cmd_demo(args):
     from .demo import run_demo
     run_demo(args.data or "demo_data")
@@ -253,12 +259,18 @@ def main(argv=None):
     b.add_argument("--once", action="store_true"); b.add_argument("--resume", action="store_true")
     b.set_defaults(fn=cmd_bili)
     sub.add_parser("state", help="查看当前状态").set_defaults(fn=cmd_state)
+    h = sub.add_parser("cc-hook", help="Claude Code hook 适配器（从 stdin 读事件 JSON，失败即放行）")
+    h.add_argument("event", choices=["session-start", "user-prompt", "stop", "pre-compact", "session-end"])
+    h.set_defaults(fn=cmd_cc_hook)
     sub.add_parser("demo", help="离线演示：模拟一天的 QQ/B站/项目消息").set_defaults(fn=cmd_demo)
     sub.add_parser("install-service", help="注册常驻计划任务（登录时自动启动，Windows）").set_defaults(fn=cmd_install_service)
     sub.add_parser("uninstall-service", help="删除常驻计划任务").set_defaults(fn=cmd_uninstall_service)
     sub.add_parser("service-start", help="立刻运行常驻计划任务（Windows）").set_defaults(fn=cmd_service_start)
     sub.add_parser("service-status", help="查看常驻计划任务状态").set_defaults(fn=cmd_service_status)
     args = p.parse_args(argv)
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
+    # hook / MCP 的 stdout 是协议通道，日志只留错误级别（真正的记录写到各自日志文件）
+    level = logging.DEBUG if args.verbose else (
+        logging.ERROR if args.cmd in ("cc-hook", "mcp") else logging.INFO)
+    logging.basicConfig(level=level,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S")
     args.fn(args)
