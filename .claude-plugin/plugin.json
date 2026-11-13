@@ -10,5 +10,19 @@
   "homepage": "https://github.com/zeros-Crtl/dsh-soulcore",
   "repository": "https://github.com/zeros-Crtl/dsh-soulcore",
   "license": "MIT",
-  "keywords": ["memory", "long-term-memory", "mcp", "hooks", "persona"]
+  "keywords": ["memory", "long-term-memory", "mcp", "hooks", "persona"],
+  "userConfig": {
+    "pythonPath": {
+      "type": "string",
+      "title": "Python ≥ 3.10（MCP 用）",
+      "description": "MCP server 用哪个解释器。Windows 上如果 MCP 连不上，填 python.exe 的绝对路径；macOS/Linux 一般填 python3。",
+      "default": "python"
+    }
+  },
+  "mcpServers": {
+    "soulcore": {
+      "command": "${user_config.pythonPath}",
+      "args": ["-I", "${CLAUDE_PLUGIN_ROOT}/core/run.py", "mcp"]
+    }
+  }
 }
