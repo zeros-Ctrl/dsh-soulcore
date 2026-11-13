@@ -227,6 +227,21 @@ def cmd_cc_hook(args):
     sys.exit(hook_main(args.event))
 
 
+def cmd_mcp(args):
+    """MCP server：stdio 上的 JSON-RPC 2.0，stdout 只放协议消息"""
+    from .mcp_server import main as mcp_main
+    sys.exit(mcp_main())
+
+
+def cmd_cc_install(args):
+    """把 hooks 合并进 Claude Code 的 settings.json（默认只打印）"""
+    from .cc_install import install
+    code, text = install(scope=args.scope, apply=args.apply, uninstall=args.uninstall,
+                         cwd=os.getcwd())
+    print(text)
+    sys.exit(code)
+
+
 def cmd_demo(args):
     from .demo import run_demo
     run_demo(args.data or "demo_data")
@@ -262,6 +277,13 @@ def main(argv=None):
     h = sub.add_parser("cc-hook", help="Claude Code hook 适配器（从 stdin 读事件 JSON，失败即放行）")
     h.add_argument("event", choices=["session-start", "user-prompt", "stop", "pre-compact", "session-end"])
     h.set_defaults(fn=cmd_cc_hook)
+    sub.add_parser("mcp", help="MCP server（stdio，给 Claude Code / Cursor / Claude Desktop 用）") \
+        .set_defaults(fn=cmd_mcp)
+    ci = sub.add_parser("cc-install", help="把 hooks 合并进 Claude Code 的 settings.json（默认只打印）")
+    ci.add_argument("--scope", choices=["user", "project"], default="user")
+    ci.add_argument("--apply", action="store_true", help="真的写文件（先备份）")
+    ci.add_argument("--uninstall", action="store_true", help="移除 soulcore 的 hooks")
+    ci.set_defaults(fn=cmd_cc_install)
     sub.add_parser("demo", help="离线演示：模拟一天的 QQ/B站/项目消息").set_defaults(fn=cmd_demo)
     sub.add_parser("install-service", help="注册常驻计划任务（登录时自动启动，Windows）").set_defaults(fn=cmd_install_service)
     sub.add_parser("uninstall-service", help="删除常驻计划任务").set_defaults(fn=cmd_uninstall_service)
