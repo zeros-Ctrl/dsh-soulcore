@@ -1,178 +1,130 @@
-# soulcore 后端（独立运行 / QQ / B站）
+# soulcore 后端：架构 / 接入方式 / 开发入口
 
-> 这是 dsh-soulcore 的 Python 后端说明。作为 DSH 插件使用时不需要手动启动它；下面的命令都在 `core/` 目录下执行。
+> 这是 dsh-soulcore 的 Python 后端说明。作为 DSH 插件使用时不需要手动启动它；
+> 下面的命令都在 `core/` 目录下执行。面向"要改代码 / 要接自己的 harness"的人，
+> 使用者文档看 [README](../README.md) 和 `docs/` 下其它几篇。
 
-核心只用 Python 标准库，没有第三方依赖；只有接 B站时需要额外装一个包。harness、QQ、B站都通过统一的事件格式接进来。
+核心只用 Python 标准库（Python **3.10+**），不装任何第三方包；只有"后端自带的 B站轮询"是例外，
+需要可选安装 `bilibili-api-python==17.4.2`（不装也能用其它功能）。
 
 ```
-QQ ── LLBot/NapCat ──(OneBot v11 HTTP)──┐
-B站 ── bilibili-api(轮询) ── 人审队列 ───┼─► Event ─► Engine ─► DeepSeek
-你的 harness ──(HTTP 钩子 / JS 客户端)───┘          │
-                                     ┌──────────┼───────────┐
-                                  情绪(PID)   关系(好感)   记忆(SQLite+Markdown)
+QQ ── NapCat ──(WebSocket / HTTP)──┐
+B站 ── 轮询 ── 人审队列 ───────────┼─► Event ─► Engine ─► DeepSeek（可选）
+Claude Code ── hooks ─────────────┤           │
+任何 harness ──(HTTP / MCP)───────┘    ┌──────┼──────────┐
+                                    情绪(PID)  关系(好感)  记忆(SQLite+Markdown)
 ```
 
-## 1. 先离线跑一遍（不需要 key 和账号）
-
-需要 Python 3.9 或更高版本。在本目录下运行：
+## 1. 先离线跑一遍
 
 ```bash
-python -m soulcore demo                          # 模拟一整天：QQ 私聊/群聊、B站评论、项目讨论、余额变化
-python -m unittest discover -s tests -v          # 35 个测试
-python -m soulcore --mock chat --project 毕设     # 命令行聊天，/help 查看命令（/skip 快进时间、/event 触发情绪、/mem 查记忆）
+python -m soulcore --mock showcase               # 三段对照演示（新会话还记得 / 过时说法 / 心情变化），< 30 秒
+python -m soulcore --mock demo                   # 模拟一整天：QQ 私聊/群聊、B站评论、项目讨论、余额变化
+python -m soulcore --mock chat --project 毕设     # 命令行聊天：/help、/skip 快进时间、/event 触发情绪、/mem 查记忆
+python -m unittest discover -s tests             # 261 个 Python 测试
 ```
 
-## 2. 接 DeepSeek
+## 2. 配置与启动
 
 ```bash
-copy config.example.json config.json             # 填 llm.api_key，或设置环境变量 DEEPSEEK_API_KEY
-python -m soulcore chat                          # 真实对话
-python -m soulcore serve                         # 启动服务：http://127.0.0.1:8765
+cp config.example.json config.json               # 填 llm.api_key，或设置 DEEPSEEK_API_KEY
+python -I run.py --config <config.json> serve    # 默认 127.0.0.1:8765，实际端口和 token 写进 soulcore.lock
+python -I run.py --config <config.json> serve --port 0 --idle-exit-min 240   # 随机端口 + 四小时空闲自退
 ```
 
-人格设定写在 `persona.md` 里，可以直接修改。`{name}` 会被替换成配置里的 `persona.name`。
+人格写在 `persona.md`，`{name}` 会替换成 `persona.name`。
+常驻（开机自启）用 `install-service` / `uninstall-service` / `service-status`。
+完整配置项见 [config.md](./config.md)。
 
-## 3. 接入你的 harness（钩子式）
+## 3. 三种接入方式
 
-harness 自己调用模型，soulcore 只负责提供"人格、情绪、记忆"这部分上下文，需要挂三个钩子：
-
-| 时机 | 调用 | 作用 |
-|---|---|---|
-| 发给模型之前 | `POST /v1/hooks/before {event}` | 返回 `system`（人格、心情、关系、召回的记忆）和 `history` |
-| 模型回复之后 | `POST /v1/hooks/after {event, reply}` | 把回复写入记忆；每 6 轮自动抽取一次长期记忆 |
-| 上下文压缩之前 | `POST /v1/hooks/pre_compact {event, messages}` | 把即将被压掉的内容先提炼并存盘，**防止压缩导致失忆** |
-
-JS 示例见 `clients/soulcore-client.js`。如果 harness 只能发消息、不能改 prompt，可以改用全托管模式 `POST /v1/chat`，由 soulcore 自己调用 DeepSeek。
-
-事件格式：
-```json
-{"platform":"local","scene":"project","channel_id":"毕设","user_id":"owner","user_name":"阿明","text":"..."}
-```
-
-## 4. 接 QQ（OneBot v11）
-
-推荐 **NapCat + 正向 WebSocket**：NapCat 那边只配一项，soulcore 主动连过去，收发同一条连接，断线自动重连。
-
-1. 装 NapCat（Windows 一键包），用**小号**扫码登录。
-2. NapCat WebUI →「网络配置 → 新建 → WebSocket 服务器」：Host `127.0.0.1`、Port `3001`、消息格式 **Array**、Token 随便设一个，启用并保存。
-3. `config.json` 里：
-   ```json
-   "qq": { "enabled": true, "transport": "ws", "ws_url": "ws://127.0.0.1:3001", "access_token": "和 NapCat 一致",
-           "group_whitelist": ["群号"], "private_whitelist": ["你的QQ号"], "group_known": [] },
-   "owner": { "qq": "你的QQ号", "name": "主人" }
-   ```
-4. 启动方式二选一：
-   - 跟随 DSH：什么都不用做，DSH 会拉起后端；
-   - 常驻（推荐，想让 QQ 一直在）：`python -m soulcore -c <config.json> install-service`，之后登录 Windows 就自动在后台起，卸载用 `uninstall-service`，查状态用 `service-status`。
-5. 连上后会自动 `get_login_info` 拿机器人自己的 QQ 号，不用手填 `self_id`。
-
-旧的 **HTTP 上报** 仍然可用：`"transport": "http"` + NapCat 里配 HTTP 服务/上报，地址 `http://127.0.0.1:8765/onebot`。
-
-她的行为规则：
-- 白名单以外的群，消息不看也不存。
-- 白名单群里的消息她都会"看到"并记下来，但只在被 @ 或被叫名字时回复。想让她偶尔主动插话，可以调高 `interject_prob`。
-- 私聊默认只回复 `private_whitelist` 里的人。
-- **主人身份合并**：`owner.qq` 那个号在私聊里和本地 DSH 共用同一份人物档案（`core/people/owner`），并且能召回项目里的决策/摘要；群里和其他人的私聊看不到项目记忆。
-
-### 单实例与"接入已有进程"
-
-后端启动时会在 `~/.dsh/soulcore/soulcore.lock` 写 `{pid, port, token, started, version}` 并加操作系统锁。
-DSH 插件启动时先读这个锁：进程活着、`/v1/health` 能通就直接接入，**不再起第二个进程**；
-抢不到锁的第二个实例会打印信息后退出，不会出现两个进程同时写 `memory.db`。
-
-DSH 退出时只会断开常驻进程，不会杀掉它——这样"她一直在"才成立。常驻模式下改配置需要重启常驻进程才生效（设置页会提示）。
-
-## 5. 接 B站（评论区 @ / 回复 + 私信）
-
-```bash
-pip install bilibili-api-python==17.4.2   # 原仓库已经归档，必须锁定这个版本
-```
-
-1. 在 `bilibili.credential` 里填浏览器 cookie：SESSDATA、bili_jct、buvid3、DedeUserID。
-2. 设置 `enabled=true`。
-
-默认的安全策略：
-- **不会自动发送**。生成的回复先进人审队列，用 `python -m soulcore review` 逐条确认、编辑或跳过。
-- 第一次运行只记录位置，不会回复历史积压的消息。
-- 私信只处理 `dm_whitelist` 里的人。
-- 评论默认每 15 秒最多 1 条、每小时最多 20 条。
-- 遇到 -352、-412 或验证码会**立即暂停**。确认账号没问题后，运行 `python -m soulcore bili --resume` 恢复。
-- 你否掉的草稿不会写进记忆。
-
-建议在账号简介里写明这是 AI。
-
-## 6. 记忆是怎么工作的（借鉴 LSTM 的门控思想）
-
-| 门 | 实现 |
-|---|---|
-| 输入门 | 每条记忆都有重要性分。原始对话按规则打分；每 6 轮由 LLM 提炼一次"事实、偏好、决策、待办"，并给出重要性 |
-| 遗忘门 | `w = 重要性 × e^(-Δt/τ) × (1 + 0.3·ln(1+被检索次数))`。τ 按类型设定：闲聊 3 天，事实 2 个月，决策 1 年。被检索一次就刷新计时，相当于"复习"。权重太低的记忆**转为冷存储，不会删除**。`pinned` 的永久事实（名字/生日/过敏）不衰减 |
-| 输出门 | 检索分数 = 相关度 × 权重 × 层级折扣。先搜当前分支，结果不够再逐级回退到父分支、core，最后是全局；回退时按 `trust` 过滤来源 |
-| 细胞状态 | 某个分支冷掉的原始对话超过 30 条时，压缩成一条摘要，保留指向原文的指针 |
-
-**信任级别（trust）**：写入时按"说话人 + 场景"定级。
-
-| 来源 | trust |
-|---|---|
-| 本地 DSH（`platform=local`）、主人的 QQ 私聊 | `owner` |
-| 其他私聊（白名单）、`qq.group_known` 里的人 | `known` |
-| 群里的其他人 | `stranger` |
-| B站评论区 | `public` |
-| B站私信 | `known` |
-
-跨分支回退时允许的级别：本地项目/会话只认 `owner`；QQ 私聊、群、B站私信认 `owner` + `known`；B站评论区只认 `public`。本群/本私聊内部的条目不受 trust 限制。合并去重时取两边里更不可信的级别。
-
-**"注入"算不算"用到"**由 `memory.touch_mode` 决定：
-
-| 值 | 注入时 | 主动检索/回复里用到时 | 30 天模拟（seed 42 / 7） |
+| 方式 | 入口 | 适合 | 文档 |
 |---|---|---|---|
-| `inject` | 刷新计时 + 访问次数 +1 | 同上 | 88.6% / 95.7% |
-| `recency`（默认） | 只刷新计时 | 刷新计时 + 访问次数 +1 | 88.6% / 94.3% |
-| `used` | 不刷新 | 刷新计时 + 访问次数 +1 | 90.0%（只跑了 seed 42） |
+| 全托管 | `POST /v1/chat` | 不想自己拼人格和记忆的 bot | [http-api.md](./http-api.md) |
+| 钩子式 | `POST /v1/hooks/{before,context,after,pre_compact,flush}`、`GET /v1/persona/stable` | 已经有自己 system prompt 的 harness（DSH 用它） | [http-api.md](./http-api.md) |
+| MCP | `python -m soulcore mcp`（stdio） | Claude Code / Cursor / Claude Desktop | [mcp.md](./mcp.md) |
+| Claude Code hook | `python -m soulcore cc-hook <event>` | 想要"自动注入 + 自动记"而不是手动调工具 | [claude-code.md](./claude-code.md) |
 
-同一随机种子下 `inject` 与 `recency` 最多差 1 题；不固定种子时指标本身在 88.6%–95.7% 之间波动。默认 `recency`：保留复习效果，但不再把"被注入"折算成重要性。
+事件格式（所有 HTTP 接口共用）：
 
-目录树对应分支，SQLite 里存的是权威数据，Markdown 文件是给你看的双向镜像（直接在文件里改/删/加，之后会自动同步回数据库）：
-
-```
-data/memory/
-  chat/qq/private/<QQ号>/   chat/qq/group/<群号>/   chat/bilibili/dm/<UID>/   chat/bilibili/comment/<BV号>/
-  project/<项目名>/decisions.md
-  core/people/owner/notes.md     core/people/<平台>/<uid>/notes.md     core/self/
+```json
+{"platform": "local", "scene": "project", "channel_id": "毕设", "user_id": "owner",
+ "user_name": "主人", "text": "...", "mentions_self": true}
 ```
 
-隐私规则（测试里有覆盖）：
-- 原始聊天记录只在本会话内可见，跨会话只会召回提炼过的条目。
-- 别人的私聊和人物档案永远查不到。
-- 项目记忆默认不进 QQ 和 B站；**主人的 QQ 私聊**例外。
-- B站评论区是公开场景，看不到任何其他聊天分支。
-- 群聊/评论区提炼出的条目不会出现在本地项目的上下文里（trust 过滤）；主人在群里说的话除外。
-- 在 Markdown 里删掉的条目会留墓碑，自动提炼不会把它写回来（`remember` 工具等主动写入不受限）。
+`(platform, scene, channel_id)` 决定记忆路径和可信度，隐私规则见
+[how-memory-works.md](./how-memory-works.md)。
 
-## 7. 情绪（PID 设定点模型）
+## 4. 后端模块
 
-事件改变的是她"想要的心情"，也就是设定点。实际情绪通过 PID 慢慢追上去，外面还有一道限速，每分钟最多变化 0.008。完整实验见 `docs/emotion/`。
-
-常用参数（`config.json` 的 `emotion` 段）：
-
-| 参数 | 含义 |
+| 文件 | 作用 |
 |---|---|
-| `baseline` | 性格基线 |
-| `sensitivity` | 敏感度 |
-| `w_lonely` | 孤独权重 |
-| `max_rate` | 每分钟最大变化量 |
-| `lonely_grace` | 多少分钟没人理会开始感到孤独 |
+| `engine.py` | 把情绪 / 关系 / 记忆 / LLM 串起来；`stable_block()`、`context_block()`、`_maybe_extract()` |
+| `memory.py` | 分层记忆库：写入、衰减、分层检索、冷回想、知识更新、Markdown 镜像（`md_lock` 串行化） |
+| `persona.py` | 人设卡、人格锚点、`system` prompt 和每轮注入文本的拼装 |
+| `emotion.py` | PID 情绪模型（设定点 → 前置滤波 → PID → 限速） |
+| `extractor.py` | 记忆提炼（LLM）/ 规则兜底、提炼门控、成本统计 |
+| `conflicts.py` | 规则版冲突检测（"搬家了""换导师了""戒咖啡了"） |
+| `timeparse.py` | "明天三点答辩" → 跟进时刻；"昨天" → 检索时间窗 |
+| `server.py` | HTTP 服务、锁文件、空闲退出 |
+| `client.py` | 短命进程（hook / MCP / CLI）用的后端客户端：`resolve_home`、`Backend.ensure/request` |
+| `cc_hook.py` | Claude Code 的 5 个 hook 事件适配（失败即放行） |
+| `mcp_server.py` | 标准库实现的 stdio MCP server（6 个工具） |
+| `cc_install.py` | 把 hooks 合并进 Claude Code 的 `settings.json` |
+| `showcase.py` | `--mock showcase` 的三段离线演示 |
+| `adapters/` | QQ（OneBot v11）、B站轮询、主动聊天 |
 
-触发情绪的事件：
-- 消息内容：按关键词判断，也可以设置 `appraisal.mode=llm` 交给 LLM 判断。
-- DeepSeek 余额：每小时查一次。余额低、用完、充值都会成为事件。
-- 好感度：对方的好感度越高，对她情绪的影响越大。
+## 5. 数据目录
 
-## 已知局限
+```
+~/.dsh/soulcore/                （或 SOULCORE_HOME；第一次运行自动创建）
+  config.json                   配置（密钥也在这，权限 600）
+  persona.md                    人设
+  soulcore.lock                 后端单实例锁：{pid, port, token, version}
+  logs/serve.log                后端日志
+  logs/cc-hook.log              Claude Code hook 日志（>1MB 轮转）
+  data/memory.db                记忆库（SQLite + FTS5）
+  data/emotion.json             情绪状态（重启后接着上次的心情）
+  data/memory/                  Markdown 镜像，按目录树归档，可以直接改/删/加
+    project/<项目名>/decisions.md
+    core/people/owner/notes.md
+    chat/qq/group/<群号>/...
+```
 
-- 关键词判断事件比较粗糙。有预算的话把 `appraisal.mode` 改成 `llm`。
-- 检索用的是二元组加 FTS5，没有语义向量，"同义不同词"的情况召回不到。后续可以加 embedding。
-- 知识更新还没做：用户先说"喜欢深色"、后说"改用浅色"，两条都会留着（`invalid_at` 字段已预留）。
-- `trust` 按说话人定级，代价是：群里她自己的承诺（`core/self`）在本地项目里召回不到；想放宽需要单独设计。
-- 主动聊天（她自己找你）还没做。
-- B站接口没有在真实账号上测过，只用模拟接口测试了流程。第一次请用 `bili --once` 配合人审小心试。
+SQLite 是权威数据，Markdown 是给你看的双向镜像：直接改/删/加，下一次同步会回到数据库。
+
+## 6. 单实例与自启动
+
+后端启动时先抢 `soulcore.lock`（操作系统文件锁），再初始化数据库；抢不到的进程打印
+`SOULCORE_ALREADY_RUNNING` 后退出，不会出现两个进程同时写 `memory.db`。
+
+DSH 插件、Claude Code hook、MCP server 这些短命进程都通过 `client.Backend` 接入已有后端：
+`discover()` 读锁 + `/v1/health`，没有就后台分离启动一个（带 `--idle-exit-min`，会自己退），
+401 / 连接断开时重读锁文件重试一次。所以 DSH 和 Claude Code 共用同一份记忆、同一个进程。
+
+## 7. 测试与评测
+
+```bash
+npm test                                             # JS 集成测试 + Python 单元/集成测试
+python -m unittest discover -s tests                 # 只跑 Python
+python -I bench/eval_longmem.py . ../docs/benchmark/longmem_v09.json --split-stable
+```
+
+`bench/` 下还有 `eval_retrieval.py`（检索消融）和 `ab_emotion.py`（情绪对照），
+数据与结论见 [benchmark/LONGMEM.md](./benchmark/LONGMEM.md)。
+
+## 8. 已知局限
+
+- **关键词判断事件比较粗糙**：有预算就把 `appraisal.mode` 改成 `llm`。
+- **语义向量默认关闭**：检索是二元组 + FTS5，同义不同词召回不到；配了 embedding 才会走语义那一支。
+- **后端自带的 B站轮询**（`bilibili.enabled`）只在模拟接口上测过流程，真实账号请先用 `bili --once` + 人审小心试；
+  QQ 里刷 B站走的是 dsh-bili-whale 的只读命令，那条链路已经用真账号跑过。
+- **Claude Code 的 `/plugin install` 和"DSH 里说过的决策在 Claude Code 里能答"** 还没有在真机上逐条验证
+  （`claude plugin validate` 通过；两个真实会话的 hook 注入、MCP 工具调用已经验证）。
+- **K7（真实 LLM 小规模评测）/ K8（OpenAI 兼容代理）没有实现**：任务书里是可选任务。
+
+## 9. 历史文档
+
+- [v0.8-review.md](./v0.8-review.md)、[v0.8.1-fixes.md](./v0.8.1-fixes.md)：上一轮复审与修复记录
+- [v0.9-delivery.md](./v0.9-delivery.md)：本版本交付说明（每个任务落在哪、和任务书的差异、验证记录）
+- [benchmark/LONGMEM.md](./benchmark/LONGMEM.md)：200 天长记忆评测的方法和数据
