@@ -156,5 +156,38 @@ class BackendTest(Base):
         self.assertIsNone(b.discover())
 
 
+class BindRetryTest(unittest.TestCase):
+    """Windows 保留端口段导致的 WinError 10013：随机端口要能自己绕过去。"""
+
+    @staticmethod
+    def _denied() -> OSError:
+        err = OSError("bind denied")
+        err.winerror = 10013
+        return err
+
+    def test_picks_a_known_good_port_after_denial(self):
+        import soulcore.server as srv
+        calls, fake = [], object()
+
+        def make(addr, _handler):
+            calls.append(addr)
+            if len(calls) == 1:
+                raise self._denied()
+            return fake
+
+        with patch.object(srv, "ThreadingHTTPServer", side_effect=make), \
+                patch.object(srv, "_pick_free_port", return_value=45678), \
+                patch.object(srv.time, "sleep"):
+            got = srv.bind_http_server("127.0.0.1", 0, None)
+        self.assertIs(got, fake)
+        self.assertEqual(calls, [("127.0.0.1", 0), ("127.0.0.1", 45678)])
+
+    def test_fixed_port_fails_fast(self):
+        import soulcore.server as srv
+        with patch.object(srv, "ThreadingHTTPServer", side_effect=self._denied()):
+            with self.assertRaises(OSError):
+                srv.bind_http_server("127.0.0.1", 8765, None)
+
+
 if __name__ == "__main__":
     unittest.main()

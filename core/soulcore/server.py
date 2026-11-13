@@ -11,7 +11,7 @@ HTTP 服务：给任意 harness（JS/TS/Python 都行）调用的钩子接口 + 
   POST /onebot                        OneBot v11 HTTP 上报地址
 """
 from __future__ import annotations
-import json, logging, os, secrets, sys, threading, time
+import json, logging, os, secrets, socket, sys, threading, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -192,24 +192,54 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
     return H
 
 
+def _pick_free_port(host: str) -> int | None:
+    """先自己绑一个随机端口拿到端口号，再立刻关掉。
+
+    系统把端口分到保留段时 bind 会报 10013；这里只接受"真的绑上了"的那个端口号，
+    接下来用它 bind 服务，就不会连续抽到保留段里的端口。
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind((host, 0))
+        return int(s.getsockname()[1])
+    except OSError:
+        return None
+    finally:
+        try:
+            s.close()
+        except OSError:
+            pass
+
+
 def bind_http_server(host: str, port: int, handler, attempts: int = 10) -> ThreadingHTTPServer:
     """绑定 HTTP 服务。port=0（随机端口，DSH 拉起子进程时就是这样）遇到 WinError 10013 时重试。
 
     Windows 上 Hyper-V / WinNAT 会在动态端口范围里保留大段端口（`netsh int ipv4 show
     excludedportrange protocol=tcp` 可以看到），系统偶尔把随机端口分到保留段里，bind 就报 10013。
-    再要一次端口通常就好了；指定了固定端口时不重试，直接报错让用户换端口。
-    实测这种拒绝有时会持续几秒（期间所有回环 bind 都失败），所以用指数退避，总共约 10 秒，
-    仍在 DSH 等待握手的 20 秒以内。"""
-    for i in range(attempts):
+    这时先睡一会儿（实测这种拒绝有时会持续几秒），然后改成"自己挑一个刚验证过能绑的端口"，
+    避免下一次又被系统随机分到保留段。指定了固定端口时不重试，直接报错让用户换端口。
+    总共约 12 秒，仍在 DSH 等待握手的 20 秒以内。"""
+    deadline = time.monotonic() + 12.0
+    i = 0
+    while True:
         try:
             return ThreadingHTTPServer((host, port), handler)
         except OSError as ex:
-            if port != 0 or getattr(ex, "winerror", None) != 10013 or i == attempts - 1:
+            if port != 0 or getattr(ex, "winerror", None) != 10013:
                 raise
-            delay = min(2.0, 0.05 * (2 ** i))
-            log.info("绑定端口被系统拒绝（WinError 10013），%.2f 秒后重试 %d/%d", delay, i + 1, attempts)
+            i += 1
+            if (i >= attempts and time.monotonic() > deadline) or i >= attempts * 4:
+                raise
+            picked = _pick_free_port(host)
+            if picked is not None:
+                try:
+                    return ThreadingHTTPServer((host, picked), handler)
+                except OSError as ex2:
+                    if getattr(ex2, "winerror", None) not in (10013, 10048):
+                        raise
+            delay = min(2.0, 0.05 * (2 ** max(0, i - 1)))
+            log.info("绑定端口被系统拒绝（WinError 10013），%.2f 秒后重试 %d/%d", delay, i, attempts)
             time.sleep(delay)
-    raise RuntimeError("unreachable")
 
 
 def serve(engine, cfg: dict, block: bool = True, lock_path: str | None = None,
