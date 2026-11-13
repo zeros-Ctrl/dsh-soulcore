@@ -4,7 +4,7 @@ import re
 import time
 
 from .conflicts import CHANGE
-from .timeparse import parse_due_string, parse_followup
+from .timeparse import parse_due_string, parse_followup, _DAY_REL, _WEEK
 
 KINDS = ("fact", "preference", "decision", "todo", "person", "self")
 
@@ -144,6 +144,34 @@ _IMPERATIVE = re.compile(r"^(帮我|给我|让我|跟我|帮忙|请你|麻烦)")
 # 生活事件：这类短句常常没有"我"字，但信息量很高
 _EVENT = re.compile(r"被(拒|录取|裁|辞|骗)|住院|感冒|发烧|生病|分手|辞职|离职|跳槽|怀孕|结婚|"
                     r"面试|答辩|考试|offer|升职|加薪|搬家|换工作")
+# 转述别人的通知（"导师说中期推迟"）和状态变化（"明天不上班"）：句子很短、没有"我"字，但很重要
+_REPORTED = re.compile(r"(?P<s>[一-鿿A-Za-z]{1,6})(?P<v>说|讲|通知|要求)")
+_STATUS_CHANGE = re.compile(r"推迟|提前|取消|改期|延期|不上班|放假|请假|调休|生病|出院|搬家|分手|复合")
+# "明天再说吧""回头再说"是敷衍，不是计划
+_DEFER = re.compile(r"再说|改天|回头再|到时候|看情况|不急|等等看|算了|再看看")
+_SAY_STOP = ("再", "天", "就", "还", "也", "又", "先", "别", "都", "才", "早", "晚", "不", "没")
+
+
+def _reported(text: str) -> bool:
+    """有人转述谁说了什么（"导师说/老板通知"），而不是"明天再说"这种敷衍。"""
+    for m in _REPORTED.finditer(text):
+        subj = m.group("s")
+        if not subj or subj.endswith(_SAY_STOP):
+            continue
+        if subj in ("听", "你", "我", "他", "她", "它", "这", "那"):
+            continue
+        return True
+    return False
+
+
+def _time_chatter(text: str) -> bool:
+    """只剩一个时间词和"好的/嗯"这种应答，没有别的内容——不值得为它花一次提炼。
+
+    "明天再说吧"靠 _DEFER 排除；"好的明天"靠这条。
+    """
+    rest = _DAY_REL.sub("", _WEEK.sub("", text))
+    rest = re.sub(r"[^\w一-鿿]", "", rest)
+    return not rest or len(rest) <= 2 or is_phatic(rest)
 
 
 def is_phatic(text: str) -> bool:
@@ -227,6 +255,14 @@ def worth_extracting(turns) -> bool:
                 return True
         except Exception:
             pass
+        # 转述 / 状态变化：常常没有"我"字（"导师说中期推迟""明天不上班"）
+        if _reported(text) or _STATUS_CHANGE.search(text):
+            return True
+        # 有时间词的陈述句："明天不上班"是信息，"今天天气不错"也算一件小事。
+        # 但要排除"明天再说吧""好的明天"这类没有内容的应答。
+        if (_DAY_REL.search(text) or _WEEK.search(text)) and not is_question(text):
+            if not _DEFER.search(text) and not _time_chatter(text):
+                return True
         if is_question(text) or is_phatic(text):
             continue
         core = re.sub(r"[^\w一-鿿]", "", text)

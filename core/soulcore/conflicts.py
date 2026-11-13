@@ -46,6 +46,8 @@ _NEG_BEFORE = re.compile(r"不|别|没")
 
 _LIKE = re.compile(r"(?:喜欢|爱)(?:喝|吃|玩|看|听|用)?\s*(?P<v>[一-鿿A-Za-z]{1,6})")
 _NEGATED = re.compile(r"戒了|戒掉|不(?:再|喜欢)?(?:喝|吃|玩|看|听|用)?|讨厌|受不了")
+# X 后面跟这些字就不是同一个对象："咖啡" ≠ "咖啡因/咖啡机/咖啡店/一杯咖啡/咖啡豆/咖啡粉/咖啡味"
+_LIKE_SUFFIX = "因机店馆杯豆粉味"
 _ASCII_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9\-\.]*")
 
 
@@ -142,6 +144,11 @@ def _rule_a(new: str, old: str) -> bool:
 
 
 def _rule_b(new: str, old: str) -> bool:
+    """喜好反转：以前"喜欢 X"，新句子明确否定了同一个 X。
+
+    X 后面紧跟 因/机/店/馆/杯/豆/粉/味 时不算同一个对象：
+    "我喜欢喝咖啡" → "我晚上不喝咖啡因饮料" 说的是两码事，不能把咖啡这个喜好藏掉。
+    """
     m = _LIKE.search(old)
     if not m:
         return False
@@ -152,8 +159,13 @@ def _rule_b(new: str, old: str) -> bool:
         return False
     # 否定的必须**就是**旧的那个对象：X 要出现在否定词后面 6 个字以内
     for neg in _NEGATED.finditer(new):
-        if x in new[neg.start():neg.start() + 6 + len(x)]:
-            return True
+        window = new[neg.start():neg.start() + 6 + len(x)]
+        pos = window.find(x)
+        while pos >= 0:
+            after = window[pos + len(x):pos + len(x) + 1]
+            if not after or after not in _LIKE_SUFFIX:
+                return True
+            pos = window.find(x, pos + 1)
     return False
 
 
