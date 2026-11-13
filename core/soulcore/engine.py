@@ -9,7 +9,7 @@ engine.py —— 把 情绪 / 关系 / 记忆 / LLM 串起来。
         pre_compact(event, msgs) → 上下文压缩前把即将丢掉的内容抽取落盘
 """
 from __future__ import annotations
-import json, os, re, threading, time, logging
+import hashlib, json, os, re, threading, time, logging
 from concurrent.futures import ThreadPoolExecutor
 
 from .emotion import Emotion, Params, EVENTS, sigmoid, logit
@@ -22,7 +22,8 @@ from .extractor import (extract_full, summarize, turn_importance, worth_extracti
                         format_transcript, EXTRACT_SYS, PROFILE_SYS)
 from .conflicts import core_text
 from .timeparse import query_window, wants_history
-from .persona import (load_card, build_system, build_context_block, make_anchor, detect_slips)
+from .persona import (load_card, build_system, build_context_block, make_anchor, detect_slips,
+                      render_stable)
 from .stickers import StickerLib, prompt_hint
 
 log = logging.getLogger("soulcore")
@@ -562,8 +563,38 @@ class Engine:
         return out
 
     # ------------------------------------------------------------------ 钩子式
-    def context_block(self, ev: Event) -> dict:
-        """DSH 用：观察这条消息 + 召回记忆，返回一小段要注入的文本"""
+    def stable_block(self, ev_like: dict | None = None) -> dict:
+        """人格锚点 + 她对自己的认识 + 主人画像：一天才变一次的东西。
+
+        以前每轮追加在消息末尾，既费 token 又命不中 DeepSeek 的提示缓存。现在交给宿主
+        放进 system prompt；宿主只在 version 变化时替换缓存。
+        profile_owner 只给主人场景（本地 DSH / 主人的 QQ 私聊）：这个接口本身只服务本地，
+        但把场景判断留着，免得以后对外开放时把主人的画像漏给别人。
+        """
+        d = ev_like or {}
+        owner_scene = True
+        if d:
+            platform = str(d.get("platform") or "local")
+            scene = str(d.get("scene") or "")
+            owner_qq = str(self.cfg.get("owner", {}).get("qq") or "")
+            owner_scene = platform == "local" or (
+                platform == "qq" and scene == "private" and bool(owner_qq)
+                and str(d.get("user_id") or "") == owner_qq)
+        anchor = self.anchor or ""
+        profile_owner = profile_self = ""
+        if owner_scene:
+            profile_owner = str(self.store.meta_get("profile_owner", "") or "")
+            profile_self = str(self.store.meta_get("profile_self", "") or "")
+        version = hashlib.sha1((anchor + profile_owner + profile_self).encode("utf-8")).hexdigest()[:12]
+        return {"version": version, "anchor": anchor, "profile_owner": profile_owner,
+                "profile_self": profile_self,
+                "text": render_stable(anchor, profile_owner, profile_self)}
+
+    def context_block(self, ev: Event, include_stable: bool = True, style: str = "companion") -> dict:
+        """DSH 用：观察这条消息 + 召回记忆，返回一小段要注入的文本
+
+        include_stable=False：锚点/画像/自我认识已经在 system prompt 里了，这里不重复。
+        """
         self.observe(ev)
         ctx = self.prepare(ev)
         with self.lock:
@@ -574,13 +605,19 @@ class Engine:
             rel = self.store.relation(ev.platform, ev.user_id)
             gated = bool(self.mcfg.get("gate_retrieval", True)) and is_phatic(ev.text)
             profile_owner, profile_self = ("", "") if gated else self._profile_texts(ev)
+        if gated and not include_stable:
+            # 稳定块已经进了 system prompt，宿主的历史里又还留着上一轮的快照：
+            # 寒暄轮再注入一遍同样的记忆纯属浪费，只留心情和亲密度。
+            mems = []
+            person = []
         text = build_context_block(self.name, ctx["mood_text"], rel, mems, person, self.clock(),
                                    self.mcfg.get("inject_max_chars", 1600), anchor=self.anchor,
                                    slips=self._slips(), profile_owner=profile_owner,
-                                   profile_self=profile_self)
+                                   profile_self=profile_self, include_stable=include_stable)
         self.cost["inject_chars_total"] += len(text)
         self.cost["inject_count"] += 1
-        return {"text": text, "mood": ctx["mood"], "label": ctx["label"], "memories": ctx["memories"]}
+        return {"text": text, "mood": ctx["mood"], "label": ctx["label"],
+                "memories": ctx["memories"] if mems else []}
 
     def remember(self, ev: Event, content: str, kind: str = "fact", importance: float = 0.85) -> int | None:
         """模型通过工具主动记住某事。这是主人授意的写入：绕过墓碑，可信度仍按来源算。"""

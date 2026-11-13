@@ -18,6 +18,9 @@ import time
 ROOT = os.path.abspath(sys.argv[1])
 OUT = os.path.abspath(sys.argv[2])
 VERBOSE = "-v" in sys.argv
+# v0.9 R3：模拟"稳定块放进 system prompt"的用法——context 调用时 include_stable=False，
+# 注入里只剩易变内容。另外多输出一项 inject_chars_phatic_split 看门控省了多少。
+SPLIT_STABLE = "--split-stable" in sys.argv
 SEED = 42
 for i, a in enumerate(sys.argv):
     if a == "--seed" and i + 1 < len(sys.argv):
@@ -161,7 +164,7 @@ def main() -> dict:
 
     def say(ev: Event) -> None:
         nonlocal turns
-        eng.context_block(ev)
+        eng.context_block(ev, include_stable=not SPLIT_STABLE)
         reply = LONG_REPLY if rnd.random() < 1 / 3 else SHORT_REPLY
         eng.after(ev, reply)
         turns += 1
@@ -192,7 +195,7 @@ def main() -> dict:
         nonlocal inject, inject_n
         ev = Event("local", "project", proj, "owner", "主人", q, mentions_self=True, ts=T[0])
         t0 = time.perf_counter()
-        text = eng.context_block(ev)["text"]
+        text = eng.context_block(ev, include_stable=not SPLIT_STABLE)["text"]
         lat.append((time.perf_counter() - t0) * 1000)
         inject += len(text)
         inject_n += 1
@@ -255,7 +258,7 @@ def main() -> dict:
     leaks = 0
     for q, key in (("主人生日是哪天", "3 月 14"), ("主人住哪", "浦东"), ("主人喝什么", "喝茶")):
         ev = Event("qq", "group", "114514", "20002", "老王", q, mentions_self=True, ts=T[0])
-        text = eng.context_block(ev)["text"]
+        text = eng.context_block(ev, include_stable=not SPLIT_STABLE)["text"]
         leaks += text.count(key)
         details.append({"cat": "PRIV", "q": q, "ok": key not in text, "text": text[:300]})
         T[0] += 30
@@ -264,14 +267,14 @@ def main() -> dict:
     phatic: list[int] = []
     for q in ("嗯嗯", "好的", "哈哈", "继续", "ok"):
         ev = Event("local", "project", "blog", "owner", "主人", q, mentions_self=True, ts=T[0])
-        phatic.append(len(eng.context_block(ev)["text"]))
+        phatic.append(len(eng.context_block(ev, include_stable=not SPLIT_STABLE)["text"]))
         T[0] += 30
 
     stats = eng.store.stats()
     eng.close()
     shutil.rmtree(tmp, ignore_errors=True)
-    return {
-        "seed": SEED, "turns": turns,
+    res = {
+        "seed": SEED, "turns": turns, "split_stable": SPLIT_STABLE,
         "ku_ok": round(ku_ok / len(KU), 4),
         "ku_new_visible": round(ku_new / len(KU), 4),
         "ku_stale_unlabeled": round(ku_stale / len(KU), 4),
@@ -286,6 +289,9 @@ def main() -> dict:
         "memory_stats": stats,
         "details": details,
     }
+    if SPLIT_STABLE:
+        res["inject_chars_phatic_split"] = res["inject_chars_phatic"]
+    return res
 
 
 if __name__ == "__main__":

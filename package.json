@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "dsh-soulcore",
   "version": "0.8.1",
   "description": "给 DeepSeek Harness 的 agent 一个独立人格：PID 平滑的概率情绪 + LSTM 门控式分层长期记忆（按项目/会话归档，压缩前自动提炼落盘），可选接入 QQ(OneBot v11) 与 B站。",
@@ -15,8 +15,8 @@
   },
   "files": ["lib", "core/soulcore", "core/run.py", "core/persona.example.md", "core/config.example.json", "cordis.patch.yml", "README.md", "LICENSE", "CHANGELOG.md"],
   "scripts": {
-    "test": "node --test tests/plugin.test.mjs && cd core && python -m unittest discover -s tests",
-    "test:js": "node --test tests/plugin.test.mjs",
+    "test": "node --test tests/plugin.test.mjs tests/plugin-stable.test.mjs && cd core && python -m unittest discover -s tests",
+    "test:js": "node --test tests/plugin.test.mjs tests/plugin-stable.test.mjs",
     "test:py": "cd core && python -m unittest discover -s tests"
   },
   "dsh": {

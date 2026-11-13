@@ -62,6 +62,10 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                 return self._send(200, engine.state())
             if u.path == "/v1/persona":
                 return self._send(200, {"name": engine.name, "text": engine.card_text()})
+            if u.path == "/v1/persona/stable":
+                # 稳定块：锚点 / 她对自己的认识 / 主人画像。宿主缓存起来放进 system prompt，
+                # 只在 version 变化时替换（这份内容一天才变一次，每轮重复注入会破坏提示缓存）。
+                return self._send(200, engine.stable_block())
             if u.path == "/v1/qq/status":
                 fn = ctl.get("qq_status")
                 return self._send(200, fn() if fn else {"enabled": False})
@@ -132,7 +136,10 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                 if u.path == "/v1/hooks/before":
                     return self._send(200, {k: v for k, v in engine.before(ev).items() if not k.startswith("_")})
                 if u.path == "/v1/hooks/context":
-                    return self._send(200, engine.context_block(ev))
+                    # include_stable=False：宿主已经把稳定块放进 system prompt，这里别重复
+                    return self._send(200, engine.context_block(
+                        ev, include_stable=bool(b.get("include_stable", True)),
+                        style=str(b.get("style") or "companion")))
                 if u.path == "/v1/memory/remember":
                     iid = engine.remember(ev, str(b.get("content", ""))[:1000], b.get("kind", "fact"),
                                           float(b.get("importance", 0.85)))
