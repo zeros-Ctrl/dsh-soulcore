@@ -12,7 +12,7 @@
 
 装完 `/plugin list` 里能看到 `soulcore`。插件同时挂上 hooks、MCP 服务和 `/soulcore:*` 命令。
 
-> GitHub 安装要求仓库已经推到 GitHub。没推之前用下面的方式 B / C，或者本地目录安装：
+> 仓库公开后可用 GitHub 来源安装；下载到本地时，也可用下面的方式 B / C，或者本地目录安装：
 > `claude --plugin-dir <仓库目录>`（开发调试用）。
 
 ## 方式 B：只要 MCP 工具（不注入、不自动记）

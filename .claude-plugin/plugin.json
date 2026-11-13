@@ -1,7 +1,7 @@
 {
   "name": "soulcore",
   "displayName": "soulcore",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "给 Claude Code 加上跨会话长期记忆和稳定人格：纯本地、零依赖、只用 Python 标准库。",
   "author": {
     "name": "zeros-Crtl",

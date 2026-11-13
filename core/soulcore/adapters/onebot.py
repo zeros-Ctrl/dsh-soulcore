@@ -100,6 +100,7 @@ class OneBotAdapter:
             ev = Event("qq", "private", uid, uid, uname, text, mentions_self=True, ts=p.get("time") or time.time(),
                        event_id=f"qq:{uid}:{p.get('message_id')}",
                        reply_target={"type": "private", "user_id": uid}, raw=p)
+            ev.is_stranger = self.engine._trust(ev) == "stranger"
             return ev, True
         if mtype == "group":
             gid = str(p.get("group_id", ""))
@@ -108,6 +109,7 @@ class OneBotAdapter:
             ev = Event("qq", "group", gid, uid, uname, text, mentions_self=mention, ts=p.get("time") or time.time(),
                        event_id=f"qq:{gid}:{p.get('message_id')}",
                        reply_target={"type": "group", "group_id": gid, "message_id": p.get("message_id")}, raw=p)
+            ev.is_stranger = self.engine._trust(ev) == "stranger"
             reply = mention or random.random() < self.cfg.get("interject_prob", 0.0)
             return ev, reply
         return None, False
@@ -120,11 +122,18 @@ class OneBotAdapter:
             except queue.Empty:
                 continue
             try:
-                out = self.engine.handle(ev, reply=reply)
+                out = self.engine.handle(ev, reply=reply, record_reply=False)
                 if out:
-                    self.send(ev, out)
+                    if self.send(ev, out):
+                        self.engine.commit_reply(ev, out)
+                    else:
+                        self.engine.discard_reply(ev)
             except Exception:
                 log.exception("处理 QQ 消息失败")
+                try:
+                    self.engine.discard_reply(ev)
+                except Exception:
+                    log.exception("清理未发送的 QQ 回复失败")
             finally:
                 self.q.task_done()
 
@@ -139,6 +148,15 @@ class OneBotAdapter:
         segs = self._segments(text)
         if not segs:
             return False
+        guard = getattr(ev, "_soulcore_delivery_guard", None)
+        if callable(guard):
+            try:
+                if not guard():
+                    log.info("取消已过时的主动消息")
+                    return False
+            except Exception:
+                log.exception("主动消息投递前检查失败")
+                return False
         if rt["type"] == "group":
             msg = []
             if rt.get("message_id") is not None:

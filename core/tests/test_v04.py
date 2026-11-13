@@ -213,6 +213,7 @@ class TestWS(Base):
             self.assertEqual(sent[0]["params"]["user_id"], 10001)
             text = sent[0]["params"]["message"][0]["data"]["text"]
             self.assertTrue(text)
+            ad.onebot.q.join()  # 等发送确认后的写回完成
             turns = eng.store.recent_turns("chat/qq/private/10001")
             self.assertEqual([t.role for t in turns], ["user", "assistant"])
             ad.stop()

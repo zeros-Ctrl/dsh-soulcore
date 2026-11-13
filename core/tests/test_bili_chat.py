@@ -137,7 +137,20 @@ class TestSearchInChat(unittest.TestCase):
         self.assertEqual(sv.call_args[0][1], "猫咪")
         self.assertIn("你刚去B站搜了「猫咪」", ctx["system"])
         self.assertIn("《橘猫的一天》", ctx["system"])
-        self.assertEqual([i["bv"] for i in eng.bili_chat.recent()][:2], ["BV1aa411c7mD", "BV1bb411c7mE"])
+        self.assertEqual([i["bv"] for i in eng.bili_chat.recent(priv(eng, ""))][:2], ["BV1aa411c7mD", "BV1bb411c7mE"])
+        eng.close()
+
+    def test_recent_search_is_scoped_to_user(self):
+        eng = make(tempfile.mkdtemp())
+        owner, other = priv(eng, ""), priv(eng, "", uid="20002")
+        eng.bili_chat.set_recent(RESULTS, "feed")
+        eng.bili_chat.set_recent(RESULTS[:2], "search", owner)
+        eng.bili_chat.set_recent(RESULTS[2:], "search", other)
+        self.assertEqual(eng.bili_chat.resolve_target("第一个讲了啥", owner)["bv"], RESULTS[0]["bv"])
+        self.assertEqual(eng.bili_chat.resolve_target("第一个讲了啥", other)["bv"], RESULTS[2]["bv"])
+        self.assertEqual(len(eng.bili_chat.recent()), 3, "用户搜索不覆盖公开刷到的视频")
+        eng.bili_chat.set_recent([], "search", owner)
+        self.assertIsNone(eng.bili_chat.resolve_target("第一个讲了啥", owner))
         eng.close()
 
     def test_not_a_video_search(self):
@@ -204,7 +217,7 @@ class TestWatchInChat(unittest.TestCase):
         eng.llm = EchoLLM()
         sent, order = [], []
         eng.qq_sender = lambda ev, text: sent.append((ev.reply_target, text)) or True
-        eng.bili_chat.set_recent(RESULTS, "search")
+        eng.bili_chat.set_recent(RESULTS, "search", priv(eng, ""))
         return eng, sent, mock.patch("soulcore.bili_watch.fetch_subtitles", side_effect=subs)
 
     def _wait(self, cond, timeout=5):
@@ -237,6 +250,16 @@ class TestWatchInChat(unittest.TestCase):
         self.assertIn("橘猫早上吃饭", sent[0][1])
         rows = eng.store.db.execute("SELECT content, trust FROM items WHERE role='assistant' ORDER BY id").fetchall()
         self.assertEqual(rows[-1]["trust"], "known", "用了字幕的那条按 known 存")
+        eng.close()
+
+    def test_failed_first_reply_cancels_follow_up(self):
+        eng, sent, p = self._setup(lambda cfg, bv, work: {"title": "橘猫", "up": "", "text": "吃饭睡觉", "reason": ""})
+        with p:
+            ev = priv(eng, "第一个讲了啥")
+            eng.prepare(ev)
+            eng.discard_reply(ev)
+            self._wait(lambda: ev.path not in eng.bili_chat._replied)
+        self.assertEqual(sent, [])
         eng.close()
 
     def test_title_not_in_list_searches_first(self):

@@ -259,6 +259,55 @@ class TestCompose(Base):
         self.assertEqual(it.status()["drafts"], [])
         eng.close()
 
+    def test_failed_delivery_keeps_followup_retryable(self):
+        eng, it = make(self.tmp, self.clock, sender=lambda ev, text: False, dry_run=False)
+        self.addCleanup(eng.close)
+        iid = eng.store.write("core/people/owner", "todo", "阿泽今天下午面试", 0.7,
+                              due_at=self.clock() - 600)
+        self.assertEqual(it.check(force=True)["action"], "error")
+        self.assertNotIn(f"item:{iid}", it._load()["done_refs"])
+        it.sender = lambda ev, text: True
+        self.assertEqual(it.check(force=True)["action"], "sent")
+        self.assertIn(f"item:{iid}", it._load()["done_refs"])
+
+    def test_reply_during_compose_cancels_stale_message(self):
+        sent = []
+        eng, it = make(self.tmp, self.clock, sender=lambda ev, text: sent.append(text) or True, dry_run=False)
+        self.addCleanup(eng.close)
+        eng.store.write("core/people/owner", "todo", "阿泽今天下午面试", 0.7,
+                        due_at=self.clock() - 600)
+
+        def compose(th, now):
+            eng.observe(owner_qq(self.clock, "我已经到家了"))
+            return "面试怎么样了？"
+        it.compose = compose
+        result = it.check(force=True)
+        self.assertEqual(result["action"], "wait", result)
+        self.assertEqual(sent, [])
+        self.assertEqual(it._load()["done_refs"], [])
+
+    def test_topic_muted_during_compose_and_cancelled_draft(self):
+        sent = []
+        eng, it = make(self.tmp, self.clock, sender=lambda ev, text: sent.append(text) or True)
+        self.addCleanup(eng.close)
+        iid = eng.store.write("core/people/owner", "todo", "阿泽今天下午面试", 0.7,
+                              due_at=self.clock() - 600)
+
+        def compose(th, now):
+            eng.store.meta_set("initiative_muted_topics", ["面试"])
+            return "面试怎么样了？"
+        it.compose = compose
+        self.assertEqual(it.check(force=True)["action"], "wait")
+        eng.store.meta_set("initiative_muted_topics", [])
+        it.compose = lambda th, now: "面试怎么样了？"
+        draft = it.check(force=True)
+        self.assertEqual(draft["action"], "draft")
+        self.assertNotIn(f"item:{iid}", it._load()["done_refs"])
+        eng.store.forget(iid)
+        result = it.draft_action(draft["qid"], "send")
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(sent, [])
+
     def test_no_api_key(self):
         eng, it = make(self.tmp, self.clock)
         eng.llm = HeuristicLLM()

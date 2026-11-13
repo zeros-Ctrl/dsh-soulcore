@@ -143,6 +143,8 @@ class Initiative:
         st.setdefault("log", [])
         st.setdefault("unanswered", 0)
         st.setdefault("done_refs", [])
+        st.setdefault("skipped_refs", [])
+        st.setdefault("owner_revision", 0)
         st.setdefault("last_qq", 0.0)
         st.setdefault("last_local", 0.0)
         st.setdefault("local_session_start", 0.0)
@@ -153,6 +155,7 @@ class Initiative:
     def _save(self, st: dict) -> None:
         st["log"] = st["log"][-200:]
         st["done_refs"] = st["done_refs"][-500:]
+        st["skipped_refs"] = st["skipped_refs"][-500:]
         self.engine.store.meta_set(STATE_KEY, st)
 
     def owner_event(self, now: float, text: str = "") -> Event:
@@ -167,6 +170,7 @@ class Initiative:
         fire = False
         with self.lock:
             st = self._load()
+            st["owner_revision"] += 1
             if ev.platform == "qq":
                 st["last_qq"] = now
                 if ev.scene == "private":
@@ -202,7 +206,8 @@ class Initiative:
     # ------------------------------------------------------------------ 念头
     def thoughts(self, st: dict, now: float) -> list[Thought]:
         eng, out = self.engine, []
-        done = set(st["done_refs"])
+        done = set(st["done_refs"]) | set(st["skipped_refs"])
+        done.update(e.get("ref") for e in st["log"] if e.get("status") == "draft")
         today = _date(now)
 
         # 跟进：他提过的将来的事，到点了
@@ -253,7 +258,35 @@ class Initiative:
             ref = f"missing:{today}"
             if ref not in done:
                 out.append(Thought("missing", min(0.7, 0.3 + (L - 0.6)), "你已经好久没和他说话了，有点想他", ref))
-        return out
+        return [th for th in out if not self._topic_muted(th)]
+
+    def _topic_muted(self, th: Thought, text: str = "") -> bool:
+        topics = self.engine.store.meta_get("initiative_muted_topics", []) or []
+        content = (th.reason + " " + text).casefold()
+        return any(str(topic).strip().casefold() in content for topic in topics if str(topic).strip())
+
+    def _delivery_blocker(self, st: dict, now: float, th: Thought, revision: int,
+                          *, force: bool = False, text: str = "") -> str:
+        """生成后再核对最新消息、聊天偏好和跟进事项，旧草稿不会抢在新回复后发出。"""
+        if int(st["owner_revision"]) != revision:
+            return "刚收到他的消息，取消这条旧草稿"
+        if self.engine.store.meta_get("initiative_muted", False):
+            return "他要求暂停主动消息"
+        if self._topic_muted(th, text):
+            return "他要求不要再主动聊这个话题"
+        if th.ref in st["done_refs"] or th.ref in st["skipped_refs"]:
+            return "这个话题已经处理过了"
+        if th.ref.startswith("item:"):
+            due = {f"item:{it.id}" for it in self.engine.store.due_items(now, trusts=("owner",))}
+            if th.ref not in due:
+                return "跟进事项已经更新或取消"
+        if not force:
+            why = self._blockers(st, now)
+            if why:
+                return why
+            if th.kind != "care" and now - float(st["last_local"] or 0) < float(self.cfg["recent_activity_skip_min"]) * 60:
+                return "他正在忙，先不打扰"
+        return ""
 
     # ------------------------------------------------------------------ 主流程
     def probability(self, st: dict, dt_min: float) -> float:
@@ -268,6 +301,8 @@ class Initiative:
 
     def _blockers(self, st: dict, now: float) -> str:
         c = self.cfg
+        if self.engine.store.meta_get("initiative_muted", False):
+            return "他要求暂停主动消息"
         if in_quiet(now, c.get("quiet_hours")):
             return "勿扰时段"
         if int(st["unanswered"]) >= int(c["max_unanswered"]):
@@ -302,6 +337,7 @@ class Initiative:
             dt_min = (now - st["last_check"]) / 60 if st["last_check"] else float(c["check_every_min"])
             st["last_check"] = now
             res = self._decide(st, now, min(30.0, dt_min), force)
+            revision = int(st["owner_revision"])
             st["last_reason"] = res.get("reason", "")
             self._save(st)
         if fire_ignored:
@@ -325,11 +361,17 @@ class Initiative:
         # ---- 阶段 3：落地（持锁）
         with self.lock:
             st = self._load()
-            if th.ref:
-                st["done_refs"].append(th.ref)
-            entry = {"id": uuid.uuid4().hex[:8], "ts": now, "kind": th.kind, "ref": th.ref,
-                     "score": round(th.score, 3), "text": text or "", "answered": None}
+            why = self._delivery_blocker(st, self._now(), th, revision, force=force, text=text or "")
+            if why:
+                st["last_reason"] = why
+                self._save(st)
+                return {"action": "wait", "reason": why, "thought": asdict(th)}
+            entry = {"id": uuid.uuid4().hex[:8], "ts": self._now(), "kind": th.kind, "ref": th.ref,
+                     "score": round(th.score, 3), "text": text or "", "answered": None,
+                     "owner_revision": revision}
             if not text:
+                if th.ref:
+                    st["skipped_refs"].append(th.ref)
                 entry["status"] = "skipped"
                 st["log"].append(entry)
                 st["last_reason"] = "她想了想，觉得现在不说比较好"
@@ -344,16 +386,21 @@ class Initiative:
                 self._save(st)
                 return {"action": "draft", "reason": st["last_reason"], "text": text, "thought": asdict(th),
                         "qid": entry["qid"]}
-        # 真发（不持锁：发送有打字延迟）
+        # 真发（不持锁：发送有打字延迟），交给适配器在实际 API 前再核对。
+        self._attach_delivery_guard(ev, th, revision, force=force, text=text)
         ok = self._send(ev, text)
         with self.lock:
             st = self._load()
-            entry["status"] = "sent" if ok else "failed"
+            cancelled = getattr(ev, "_soulcore_delivery_blocked", "")
+            entry["status"] = "sent" if ok else ("cancelled" if cancelled else "failed")
             entry["ts"] = self._now()
+            if ok and th.ref:
+                st["done_refs"].append(th.ref)
             st["log"].append(entry)
-            st["last_reason"] = "已发送" if ok else "发送失败（QQ 没连上？）"
+            st["last_reason"] = "已发送" if ok else cancelled or "发送失败（QQ 没连上？）"
             self._save(st)
-        return {"action": "sent" if ok else "error", "reason": st["last_reason"], "text": text, "thought": asdict(th)}
+        return {"action": "sent" if ok else ("wait" if cancelled else "error"),
+                "reason": st["last_reason"], "text": text, "thought": asdict(th)}
 
     def _finish(self, res: dict) -> dict:
         with self.lock:
@@ -368,6 +415,8 @@ class Initiative:
             return {"action": "off", "reason": "主动聊天没有开启"}
         if not self.owner:
             return {"action": "off", "reason": "还没有填你的 QQ 号"}
+        if self.engine.store.meta_get("initiative_muted", False):
+            return {"action": "wait", "reason": "他要求暂停主动消息"}
         if not force:
             why = self._blockers(st, now)
             if why:
@@ -402,10 +451,23 @@ class Initiative:
             return None
         return out[:300]
 
+    def _attach_delivery_guard(self, ev: Event, th: Thought, revision: int, *, force: bool, text: str) -> None:
+        def allowed() -> bool:
+            with self.lock:
+                why = self._delivery_blocker(self._load(), self._now(), th, revision, force=force, text=text)
+            ev._soulcore_delivery_blocked = why
+            return not why
+
+        # 进程内属性不会进入 Event.to_dict()，草稿存储也不保存回调。
+        ev._soulcore_delivery_guard = allowed
+
     def _send(self, ev: Event, text: str) -> bool:
         if self.sender is None:
             return False
         try:
+            guard = getattr(ev, "_soulcore_delivery_guard", None)
+            if callable(guard) and not guard():
+                return False
             ok = bool(self.sender(ev, text))
         except Exception as ex:
             log.warning("主动消息发送失败：%s", ex)
@@ -429,9 +491,20 @@ class Initiative:
         if self.sender is None:
             return {"ok": False, "error": "QQ 没有连接，发不出去"}
         ev = Event.from_dict(it["event"])
+        with self.lock:
+            st = self._load()
+            entry = next((e for e in st["log"] if e.get("qid") == qid), None)
+            if entry is None:
+                return {"ok": False, "error": "草稿缺少跟进记录，请重新生成"}
+            th = Thought(entry["kind"], entry["score"], ev.text, entry.get("ref", ""))
+            revision = int(entry.get("owner_revision", st["owner_revision"]))
+            why = self._delivery_blocker(st, self._now(), th, revision, force=True, text=it["draft"])
+            if why:
+                return {"ok": False, "error": why}
+        self._attach_delivery_guard(ev, th, revision, force=True, text=it["draft"])
         ok = self._send(ev, it["draft"])
         if not ok:
-            return {"ok": False, "error": "发送失败（QQ 没连上？）"}
+            return {"ok": False, "error": getattr(ev, "_soulcore_delivery_blocked", "") or "发送失败（QQ 没连上？）"}
         self.queue.update(qid, status="sent", sent_at=self._now())
         self._mark(qid, "sent", ts=self._now())
         return {"ok": True}
@@ -442,6 +515,8 @@ class Initiative:
             for e in st["log"]:
                 if e.get("qid") == qid:
                     e["status"] = status
+                    if status == "sent" and e.get("ref"):
+                        st["done_refs"].append(e["ref"])
                     if ts is not None:
                         e["ts"] = ts            # 回复窗口从真正发出时开始算
                         e["answered"] = None
@@ -462,6 +537,8 @@ class Initiative:
             "today": sum(1 for e in st["log"] if e.get("status") in ("sent", "draft") and e["ts"] >= today0),
             "max_per_day": int(c["max_per_day"]),
             "unanswered": int(st["unanswered"]),
+            "muted": bool(self.engine.store.meta_get("initiative_muted", False)),
+            "muted_topics": self.engine.store.meta_get("initiative_muted_topics", []) or [],
             "reply_rate": (round(sum(1 for e in decided if e["answered"]) / len(decided), 3) if decided else None),
             "sent_30d": len(sent),
             "last_reason": st.get("last_reason", ""),

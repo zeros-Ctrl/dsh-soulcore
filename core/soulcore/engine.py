@@ -25,6 +25,8 @@ from .timeparse import query_window, wants_history
 from .persona import (load_card, build_system, build_context_block, make_anchor, detect_slips,
                       render_stable, _ago)
 from .stickers import StickerLib, prompt_hint
+from .chat_intents import parse_intent, topic_matches
+from dataclasses import replace
 
 log = logging.getLogger("soulcore")
 
@@ -93,7 +95,11 @@ class Engine:
         self.prev_label = None
         self.initiative = None          # 主动聊天模块（serve() 里挂上；见 initiative.py）
         self._injected: dict[str, tuple[list, float]] = {}   # path → (上一轮注入的记忆, 时刻)
-        self._last_mems: dict[str, tuple[list, float]] = {}   # 门控用：寒暄时沿用上一轮的记忆
+        self._last_mems: dict[tuple, tuple[list, float]] = {}
+        self._memory_revision = self.store.meta_get("memory_revision", 0)
+        self._extract_pending = {}
+        self._last_events = {}
+        self._user_states = {}
         # v0.8 成本统计：Delta 在 self.cost 里攒，tick() 时并进 meta 累加
         self.cost = {k: 0 for k in COST_KEYS}
         # v0.4：主人档案统一到 core/people/owner，把老路径的条目迁过来，不然她会"忘记你"
@@ -166,12 +172,12 @@ class Engine:
         return "public"
 
     def _allowed_trusts(self, ev: Event) -> tuple[str, ...]:
-        """跨分支回退检索时允许召回的可信级别（本分支不受限）。"""
+        """可信度和可见范围分别控制；本地只召回主人来源。"""
         if ev.platform == "local":
             return ("owner",)                      # 本地 DSH 只看主人自己的记忆
         if ev.platform == "bilibili" and ev.scene == "comment":
             return ("public",)                     # 公开场景：其他人的东西一概不看
-        return ("owner", "known")                  # QQ 私聊/群、B站私信
+        return ("owner", "known", "stranger", "public")
 
     def _is_owner_qq(self, ev: Event, private_only: bool = False) -> bool:
         owner = str(self.cfg.get("owner", {}).get("qq") or "")
@@ -184,6 +190,96 @@ class Engine:
         if ev.platform == "local" or self._is_owner_qq(ev, private_only=True):
             return "core/people/owner"
         return ev.person_path
+
+
+    def _cache_key(self, ev: Event) -> tuple:
+        return ev.path, str(ev.user_id), str(ev.thread_id)
+
+    def _allowed_audiences(self, ev: Event) -> tuple[str, ...]:
+        if ev.platform == "local" or self._is_owner_qq(ev, private_only=True):
+            return ("public", "owner", ev.path)
+        return ("public", ev.path)
+
+    def _audience(self, ev: Event) -> str:
+        return "owner" if ev.platform == "local" or self._is_owner_qq(ev, private_only=True) else ev.path
+
+    def _invalidate_caches(self) -> None:
+        revision = self.store.meta_get("memory_revision", 0)
+        if revision != self._memory_revision:
+            self._last_mems.clear()
+            self._injected.clear()
+            self._memory_revision = revision
+
+    def discard_reply(self, ev: Event) -> None:
+        with self.lock:
+            self._injected.pop(self._cache_key(ev), None)
+            self._public_ctx.discard(ev.path)
+        self.bili_chat.discard_reply(ev)
+
+    def _control(self, ev: Event) -> str | None:
+        intent = parse_intent(ev.text)
+        if not intent:
+            return None
+        action = intent["action"]
+        if action == "remember":
+            from .extractor import _temporary_persona_memory
+            kind = "preference" if re.search(r"喜欢|讨厌|不爱|爱吃|偏好", intent["content"]) else "fact"
+            if _temporary_persona_memory(intent["content"], kind):
+                return "好，这次聊天我会记着。"
+            self.remember(ev, intent["content"], kind=kind)
+            return "记住了。"
+        if action in ("mute", "unmute", "mute_topic") and self._trust(ev) != "owner":
+            return "主动聊天设置需要主人来改。"
+        if action in ("mute", "unmute"):
+            self.store.meta_set("initiative_muted", action == "mute")
+            if action == "mute":
+                return "好，我不再主动给你发消息。"
+            enabled = bool((self.cfg.get("initiative") or {}).get("enabled"))
+            return "可以主动找你聊天了。" if enabled else "已解除暂停；主动聊天还没在设置里开启。"
+        topic = intent.get("topic", "")
+        if topic in ("这件事", "这个", "这条", "它"):
+            previous = [t for t in self.store.recent_turns(ev.path, 20)
+                        if t.role == "user" and str(t.user_id) == str(ev.user_id) and t.content != ev.text]
+            if not previous:
+                return "我没找到你指的那件事，请告诉我要处理的内容。"
+            topic = previous[-1].content
+        if action == "mute_topic":
+            topics = list(self.store.meta_get("initiative_muted_topics", []) or [])
+            if topic and topic not in topics:
+                self.store.meta_set("initiative_muted_topics", (topics + [topic])[-50:])
+            return "好，以后不主动提这件事。"
+        # 只处理说话人可见、可归属的条目；同群其他人的事实不能被一起删除。
+        from .memory import _item
+        with self.lock:
+            rows = self.store.db.execute(
+                "SELECT * FROM items WHERE status != 'deleted' AND (path IN (?,?) OR source_path=?) ORDER BY id DESC",
+                (ev.path, self._person_path(ev), ev.path)).fetchall()
+            selected = []
+            for row in rows:
+                it = _item(row)
+                if it.audience not in self._allowed_audiences(ev):
+                    continue
+                owner_legacy = (self._trust(ev) == "owner" and ev.scene not in ("group", "comment") and not it.user_id and
+                                (it.path == self._person_path(ev) or it.source_path == ev.path or it.path == ev.path))
+                same_user = str(it.user_id) == str(ev.user_id)
+                same_origin = (it.path in (ev.path, self._person_path(ev)) or it.source_path == ev.path)
+                if not (same_origin and (same_user or owner_legacy)):
+                    continue
+                if topic_matches(topic, it.content):
+                    selected.append(it)
+            if action == "forget":
+                count = sum(bool(self.store.forget(it.id)) for it in selected)
+                self._invalidate_caches()
+                return "相关记忆已经忘掉了。" if count else "没找到可删除的相关记忆。"
+            if action == "complete":
+                through = self.store.db.execute("SELECT COALESCE(MAX(id),0) FROM items WHERE path=? AND kind='turn'", (ev.path,)).fetchone()[0]
+                cancelled = list(self.store.meta_get("chat_cancelled_followups", []) or [])
+                cancelled.append({"path": ev.path, "user_id": str(ev.user_id), "topic": topic, "through_id": through})
+                self.store.meta_set("chat_cancelled_followups", cancelled[-100:])
+                sum(self.store.supersede(it.id, None, new_trust=self._trust(ev))
+                              for it in selected if it.kind == "todo" or it.due_at is not None)
+                return "知道了，这件事已结束，不再跟进。"
+        return None
 
     # ------------------------------------------------------------------ 人格锚点 / 助手腔提醒
     def _slips(self) -> list[str]:
@@ -219,6 +315,8 @@ class Engine:
         """主人画像只在"主人自己的场景"注入：本地 DSH 或主人的 QQ 私聊。群聊/别人一概不给。"""
         if not (ev.platform == "local" or self._is_owner_qq(ev, private_only=True)):
             return "", ""
+        if self.store.meta_get("profile_dirty", False):
+            return "", ""
         return (str(self.store.meta_get("profile_owner", "") or ""),
                 str(self.store.meta_get("profile_self", "") or ""))
 
@@ -236,7 +334,8 @@ class Engine:
             cold = self.store.search(query, ev.path, k=12, extra_paths=extra, only_cold=True,
                                      include_turns=False, public=ev.scene == "comment",
                                      allow_projects=share, allowed_trusts=self._allowed_trusts(ev),
-                                     touch=False, window=win[:2] if win else None)
+                                     touch=False, window=win[:2] if win else None,
+                                     allowed_audiences=self._allowed_audiences(ev))
         except Exception as ex:
             log.info("冷存储回想失败：%s", ex)
             return mems
@@ -279,26 +378,29 @@ class Engine:
             rel = self.store.relation(ev.platform, ev.user_id)
             info = {"event": None, "amp": 0.0, "directed": directed}
             if directed:
-                ap = appraise(ev.text, ev.is_stranger, self.llm, self.cfg.get("appraisal", {}).get("mode", "heuristic"),
+                stranger = self._trust(ev) == "stranger" or ev.is_stranger
+                ap = appraise(ev.text, stranger, self.llm, self.cfg.get("appraisal", {}).get("mode", "heuristic"),
                               name=self.name)
                 name = ap.event
                 spec = EVENTS[name]
                 amp = self.emo.sample_amp(name) * ap.intensity
                 if spec.social:  # 越在乎的人，影响越大
                     amp *= 0.6 + 0.8 * rel["affinity"]
-                if ev.is_stranger:
+                if stranger:
                     amp *= 0.6
                 last_social = self.emo.last_social
                 amp = self.emo.event(name, t=self._now_min(), amp=amp)
                 if not ev.is_social:
                     # 评论区路人互动不算"有人陪"（不重置孤独）
                     self.emo.last_social = last_social
-                a = sigmoid(logit(rel["affinity"]) + 0.08 * amp)
+                self._user_states[self._cache_key(ev)] = getattr(ap, "user_state", "")
+                a = sigmoid(logit(rel["affinity"]) + 0.08 * amp) if ap.about_me else rel["affinity"]
                 self.store.update_relation(ev.platform, ev.user_id, ev.user_name, a)
                 info.update(event=name, amp=amp)
             self.store.write(ev.path, "turn", ev.text, turn_importance(ev.text, ev.mentions_self, ev.scene),
                              role="user", speaker=ev.user_name or ev.user_id, user_id=ev.user_id,
-                             ts=ev.ts, trust=self._trust(ev))
+                             ts=ev.ts, trust=self._trust(ev), audience=self._audience(ev), source_path=ev.path)
+            self._last_events[ev.path] = ev
             if self.initiative is not None and self._trust(ev) == "owner":
                 try:
                     self.initiative.on_owner_message(ev)
@@ -312,6 +414,8 @@ class Engine:
         m = self.mcfg
         with self.lock:
             self._advance()
+            self._invalidate_caches()
+            cache_key = self._cache_key(ev)
             recent = self.store.recent_turns(ev.path, m.get("recent_turns", 12))
             recent_ids = {t.id for t in recent}
             # 只有半小时内的上文才算"正在聊的话题"，几天前的旧话混进查询只会带偏
@@ -331,7 +435,7 @@ class Engine:
             if gated:
                 # 寒暄不检索：既省一次 embedding，也不会把不相干的旧事翻出来。
                 # 沿用上一轮的记忆（10 分钟内），沿用不算"又想起一次"，所以不 touch。
-                prev, ts = self._last_mems.get(ev.path, ([], 0.0))
+                prev, ts = self._last_mems.get(cache_key, ([], 0.0))
                 mems = list(prev) if prev and self.clock() - ts <= 600 else []
                 self.cost["retrieval_skipped"] += 1
             else:
@@ -340,6 +444,7 @@ class Engine:
                     public=ev.scene == "comment",
                     allow_projects=share,
                     allowed_trusts=self._allowed_trusts(ev),
+                    allowed_audiences=self._allowed_audiences(ev),
                     touch=touch_mode in ("inject", "recency"),
                     count=touch_mode == "inject",
                     include_history=wants_history(ev.text),
@@ -347,10 +452,11 @@ class Engine:
                     if it.id not in recent_ids][:top_k]
                 if touch_mode in ("recency", "used"):
                     # 记下这一轮注入了什么，等回复出来再看有没有真的用到
-                    self._injected[ev.path] = (list(mems), self.clock())
+                    self._injected[cache_key] = (list(mems), self.clock())
                 mems = self._cold_recall(ev, query, extra, share, mems, win)
-                self._last_mems[ev.path] = (list(mems), self.clock())
-            person = self.store.by_path(self._person_path(ev), limit=6)
+                self._last_mems[cache_key] = (list(mems), self.clock())
+            person = [it for it in self.store.by_path(self._person_path(ev), limit=6,
+                      allowed_audiences=self._allowed_audiences(ev)) if it.trust in self._allowed_trusts(ev)]
             rel = self.store.relation(ev.platform, ev.user_id)
             mood_text = self.emo.describe(self.prev_label)
             self.prev_label = self.emo.label(self.prev_label)
@@ -364,6 +470,11 @@ class Engine:
         system = build_system(self.card, ev, mood_text, rel, mems, person, now, emoji_hint=hint,
                               anchor=self.anchor, slips=self._slips(),
                               profile_owner=profile_owner, profile_self=profile_self)
+        state = self._user_states.get(self._cache_key(ev), "")
+        if state == "distress":
+            system += "\n\n对方正在诉说自己的挫折或难受：先接住他的感受，别当成他在骂你。"
+        elif state == "success":
+            system += "\n\n这是对方自己的好消息：自然为他高兴，别当成他在夸你。"
         bcfg = self._bili_cfg()
         if ev.platform == "qq" and bcfg:
             # 能力说明常驻：不然她只在触发时看到一段素材，不知道自己"会刷"，
@@ -409,7 +520,7 @@ class Engine:
             return
         # 助手腔纠偏：不改她的回复，只记一条"最近注意"，下一轮注入时提醒一句
         slips = detect_slips(reply, ev.platform)
-        if slips:
+        if slips and self._trust(ev) == "owner":
             with self.lock:
                 self._add_slips(slips)
         t = self._trust(ev)
@@ -422,9 +533,10 @@ class Engine:
             t = stricter(t, "known")
         with self.lock:
             self.store.write(ev.path, "turn", reply, 0.15, role="assistant", speaker=self.name,
-                             trust=t)
+                             trust=t, user_id=ev.user_id, audience=self._audience(ev), source_path=ev.path)
+            self._invalidate_caches()
             if self.mcfg.get("touch_mode", "recency") in ("recency", "used"):
-                items, ts = self._injected.pop(ev.path, ([], 0.0))
+                items, ts = self._injected.pop(self._cache_key(ev), ([], 0.0))
                 # 超过 15 分钟才到的回复不算这一轮，别把旧注入当"用到了"
                 if items and self.clock() - ts < 900:
                     used = [it.id for it in items if used_in_reply(it.content, reply)]
@@ -434,51 +546,84 @@ class Engine:
         self._maybe_extract(ev)
 
     def _maybe_extract(self, ev: Event, force: bool = False) -> int:
-        """到点就提炼。返回**同步**提炼出的条数（force=False 时后台跑，返回 0）。"""
-        every = self.mcfg.get("extract_every", 6)
-        gap_min = float(self.mcfg.get("segment_gap_min", 30))
+        """成功后才提交抽取指针；强制刷新排空调用时已有的全部批次。"""
         key = f"extract_ptr:{ev.path}"
         with self.lock:
-            ptr = self.store.meta_get(key, 0)
-            n = self.store.db.execute("SELECT COUNT(*) FROM items WHERE path=? AND kind='turn' AND id>?",
-                                      (ev.path, ptr)).fetchone()[0]
-            if n == 0 or (n < every and not force):
-                # 话题段结束也是一种触发：两轮之间隔了半小时以上，前面的就先提炼掉，
-                # 免得一个批次里混进好几个话题
-                if n < 2 or not self._topic_gap(ev.path, gap_min):
-                    return 0
-            rows = self.store.db.execute(
-                "SELECT * FROM items WHERE path=? AND kind='turn' AND id>? ORDER BY id LIMIT 60",
-                (ev.path, ptr)).fetchall()
-            from .memory import _item
-            turns = [_item(r) for r in rows]
-            # 一个批次不跨天：valid_from 取的是 batch 里最后一轮的时间，跨天会把"昨天说的"
-            # 记成"今天说的"，问"昨天决定了什么"就找不着了。剩下的留给下一批。
-            if turns:
-                first_day = time.strftime("%Y-%m-%d", time.localtime(turns[0].created))
-                for j, t in enumerate(turns):
-                    if time.strftime("%Y-%m-%d", time.localtime(t.created)) != first_day:
-                        turns = turns[:j]
-                        break
-            if not turns:
-                return 0
-            self.store.meta_set(key, turns[-1].id)
-        fut = self.bg.submit(self._extract_job, ev, turns)
-        # 后台任务里的异常不会自己冒出来：至少留一条日志，不然"抽取悄悄停了"很难查
-        fut.add_done_callback(lambda f: f.exception() and log.warning("记忆抽取异常：%s", f.exception()))
-        if force:
-            return int(fut.result() or 0)
-        return 0
+            high = self.store.db.execute(
+                "SELECT COALESCE(MAX(id),0) FROM items WHERE path=? AND kind='turn'", (ev.path,)).fetchone()[0]
+        total = 0
+        while True:
+            with self.lock:
+                pending = self._extract_pending.get(ev.path)
+                if pending and pending.done():
+                    self._extract_pending.pop(ev.path, None)
+                    try:
+                        pending.result()
+                    except Exception:
+                        if force:
+                            raise
+                    pending = None
+                if not pending:
+                    ptr = int(self.store.meta_get(key, 0) or 0)
+                    rows = self.store.db.execute(
+                        "SELECT * FROM items WHERE path=? AND kind='turn' AND id>? AND id<=? "
+                        "AND status!='deleted' ORDER BY id LIMIT 60", (ev.path, ptr, high)).fetchall()
+                    if not rows:
+                        return total
+                    gap = float(self.mcfg.get("segment_gap_min", 30)) * 60
+                    idle = self.clock() - rows[-1]["created"] >= gap
+                    if not force and len(rows) < self.mcfg.get("extract_every", 6) and not idle and not self._topic_gap(ev.path, gap / 60):
+                        return total
+                    from .memory import _item
+                    turns = [_item(r) for r in rows]
+                    day = time.strftime("%Y-%m-%d", time.localtime(turns[0].created))
+                    for j, turn in enumerate(turns):
+                        if time.strftime("%Y-%m-%d", time.localtime(turn.created)) != day:
+                            turns = turns[:j]
+                            break
+                    pending = self.bg.submit(self._extract_batch, ev, turns, force)
+                    self._extract_pending[ev.path] = pending
+                    pending.add_done_callback(lambda f: f.exception() and log.warning("记忆抽取失败，保留指针重试：%s", f.exception()))
+            if not force:
+                return total
+            try:
+                total += int(pending.result() or 0)
+            finally:
+                with self.lock:
+                    if self._extract_pending.get(ev.path) is pending:
+                        self._extract_pending.pop(ev.path, None)
+
+    def _extract_batch(self, ev: Event, turns, force: bool) -> int:
+        groups = {}
+        last_uid = str(ev.user_id)
+        names = {}
+        with self.lock:
+            live = {r[0] for r in self.store.db.execute(
+                "SELECT id FROM items WHERE path=? AND kind='turn' AND status!='deleted'", (ev.path,))}
+        for turn in turns:
+            if turn.id not in live:
+                continue
+            if turn.role == "user":
+                last_uid = str(turn.user_id or ev.user_id)
+                names[last_uid] = turn.speaker
+            uid = str(turn.user_id or last_uid)
+            groups.setdefault(uid, []).append(turn)
+        n = 0
+        for uid, batch in groups.items():
+            source = replace(ev, user_id=uid, user_name=names.get(uid, ev.user_name))
+            n += self._extract_job(source, batch, force)
+        with self.lock:
+            self.store.meta_set(f"extract_ptr:{ev.path}", turns[-1].id)
+        return n
 
     def flush_event(self, ev: Event) -> int:
-        """对 event.path 下还没提炼的 turn 立刻强提炼（Claude Code 的 PreCompact / SessionEnd 用）"""
         return self._maybe_extract(ev, force=True)
 
     def _topic_gap(self, path: str, gap_min: float) -> bool:
         rows = self.store.db.execute(
-            "SELECT created FROM items WHERE path=? AND kind='turn' ORDER BY id DESC LIMIT 2",
-            (path,)).fetchall()
-        return len(rows) == 2 and (rows[0]["created"] - rows[1]["created"]) > gap_min * 60
+            "SELECT created FROM items WHERE path=? AND kind='turn' AND role='user' "
+            "AND status!='deleted' ORDER BY id DESC LIMIT 2", (path,)).fetchall()
+        return len(rows) == 2 and rows[0]["created"] - rows[1]["created"] > gap_min * 60
 
     def _extract_job(self, ev: Event, turns, force: bool = False) -> int:
         m = self.mcfg
@@ -499,19 +644,21 @@ class Engine:
         if probe:
             try:
                 cands = self.store.search(probe, ev.path, k=8, extra_paths=[self._person_path(ev)],
-                                          include_turns=False, touch=False, allow_projects=True,
-                                          allowed_trusts=self._allowed_trusts(ev))
-                existing = [{"id": c.id, "kind": c.kind, "content": c.content[:120]} for c in cands]
+                                          include_turns=False, touch=False, allow_projects=ev.platform == "local",
+                                          allowed_trusts=self._allowed_trusts(ev),
+                                          allowed_audiences=self._allowed_audiences(ev))
+                existing = [{"id": c.id, "kind": c.kind, "content": c.content[:120]} for c in cands
+                            if str(c.user_id) == str(ev.user_id) or (not c.user_id and self._trust(ev) == "owner")]
             except Exception as ex:
                 log.info("取旧记忆失败：%s", ex)
         self.cost["extract_calls"] += 1
         self.cost["extract_in_chars"] += len(EXTRACT_SYS) + len(format_transcript(turns, limits))
         try:
             res = extract_full(self.llm, turns, ev.path, existing=existing,
-                               persona_hint=self.anchor, limits=limits)
+                               persona_hint=self.anchor, limits=limits, strict=True)
         except Exception as ex:
             log.warning("记忆抽取失败: %s", ex)
-            return 0
+            raise
         mems = res.get("memories", [])
         # 陌生人批次不能改写她的人设：只有主人在场的批次才接受 LLM 的"最近注意"
         if trust == "owner":
@@ -519,8 +666,10 @@ class Engine:
         valid_from = max((getattr(t, "created", 0) or 0 for t in turns), default=0) or None
         n = 0
         for mm in mems:
+            if (mm["kind"] == "todo" or mm.get("due_at") is not None) and self._followup_cancelled(ev, mm["content"]):
+                continue
             about = mm["about"]
-            if mm["project"] or about == "project":
+            if ev.platform == "local" and (mm["project"] or about == "project"):
                 path = f"project/{_safe(mm['project'] or ev.channel_id)}"
             elif about == "self" or mm["kind"] == "self":
                 path = "core/self"
@@ -530,8 +679,10 @@ class Engine:
                 path = ev.path
             tags = mm["tags"] + mm.get("keywords", []) + ([f"user:{ev.user_id}"] if about == "user" else [])
             with self.lock:
+                if any(t.id and self.store.db.execute("SELECT status FROM items WHERE id=?", (t.id,)).fetchone()[0] == "deleted" for t in turns):
+                    raise RuntimeError("抽取期间来源被删除，下一批重新读取")
                 nid = self.store.write(path, mm["kind"], mm["content"], mm["importance"], tags=tags,
-                                       user_id=ev.user_id if about == "user" else "",
+                                       user_id=ev.user_id, audience=self._audience(ev), source_path=ev.path,
                                        trust=trust, pinned=bool(mm.get("pinned")),
                                        due_at=mm.get("due_at"), valid_from=valid_from)
                 if nid:
@@ -540,6 +691,25 @@ class Engine:
                         if self.store.supersede(rid, nid, new_trust=trust):
                             self.cost["superseded"] += 1
         return n
+
+    def _followup_cancelled(self, ev: Event, content: str) -> bool:
+        for cancellation in self.store.meta_get("chat_cancelled_followups", []) or []:
+            if cancellation["path"] != ev.path or cancellation["user_id"] != str(ev.user_id):
+                continue
+            topic = cancellation["topic"]
+            if not topic_matches(topic, content):
+                continue
+            with self.lock:
+                later = self.store.db.execute(
+                    "SELECT content,created FROM items WHERE path=? AND user_id=? AND role='user' "
+                    "AND kind='turn' AND status!='deleted' AND id>?",
+                    (ev.path, ev.user_id, cancellation["through_id"])).fetchall()
+            from .timeparse import parse_followup
+            renewed = any(topic_matches(topic, r["content"]) and parse_followup(r["content"], r["created"]) is not None
+                          and (parse_intent(r["content"]) or {}).get("action") != "complete" for r in later)
+            if not renewed:
+                return True
+        return False
 
     def flush(self) -> None:
         """等后台抽取任务做完（测试 / 退出前用）"""
@@ -556,16 +726,19 @@ class Engine:
             log.error("LLM 调用失败: %s", ex)
             return None
 
-    def handle(self, ev: Event, reply: bool = True) -> str | None:
+    def handle(self, ev: Event, reply: bool = True, *, record_reply: bool = True) -> str | None:
         self.observe(ev)
         if not reply:
             self._maybe_extract(ev)
             return None
-        ctx = self.prepare(ev)
-        out = self.generate(ctx)
+        out = self._control(ev)
+        if out is None:
+            ctx = self.prepare(ev)
+            out = self.generate(ctx)
         if out:
             out = re.sub(rf"^{re.escape(self.name)}[:：]\s*", "", out)
-            self.commit_reply(ev, out)
+            if record_reply:
+                self.commit_reply(ev, out)
         return out
 
     # ------------------------------------------------------------------ 钩子式
@@ -588,7 +761,7 @@ class Engine:
                 and str(d.get("user_id") or "") == owner_qq)
         anchor = self.anchor or ""
         profile_owner = profile_self = ""
-        if owner_scene:
+        if owner_scene and not self.store.meta_get("profile_dirty", False):
             profile_owner = str(self.store.meta_get("profile_owner", "") or "")
             profile_self = str(self.store.meta_get("profile_self", "") or "")
         version = hashlib.sha1((anchor + profile_owner + profile_self).encode("utf-8")).hexdigest()[:12]
@@ -602,12 +775,15 @@ class Engine:
         include_stable=False：锚点/画像/自我认识已经在 system prompt 里了，这里不重复。
         """
         self.observe(ev)
+        control = self._control(ev)
         ctx = self.prepare(ev)
         with self.lock:
             mems = [m for m in ctx["_mem_items"]]
             shown = {m.id for m in mems}
             # 人物档案只常驻最重要的 2 条（比如名字）；其余的靠和当前话题相关才被召回
-            person = [p for p in self.store.by_path(self._person_path(ev), limit=2) if p.id not in shown]
+            person = [p for p in self.store.by_path(self._person_path(ev), limit=2,
+                      allowed_audiences=self._allowed_audiences(ev))
+                      if p.id not in shown and p.trust in self._allowed_trusts(ev)]
             rel = self.store.relation(ev.platform, ev.user_id)
             gated = bool(self.mcfg.get("gate_retrieval", True)) and is_phatic(ev.text)
             profile_owner, profile_self = ("", "") if gated else self._profile_texts(ev)
@@ -619,18 +795,25 @@ class Engine:
         if (style or "").lower() == "memory":
             # Claude Code 的 memory 风格：只给跨会话记忆，不带心情/好感/锚点/画像
             text = self._memory_style_text(mems)
+            if control:
+                text += "\n[soulcore·已执行聊天指令] " + control
             self.cost["inject_chars_total"] += len(text)
             self.cost["inject_count"] += 1
             return {"text": text, "mood": ctx["mood"], "label": ctx["label"],
-                    "memories": ctx["memories"]}
+                    "memories": ctx["memories"], "stable": self.stable_block(ev.to_dict())}
         text = build_context_block(self.name, ctx["mood_text"], rel, mems, person, self.clock(),
                                    self.mcfg.get("inject_max_chars", 1600), anchor=self.anchor,
                                    slips=self._slips(), profile_owner=profile_owner,
                                    profile_self=profile_self, include_stable=include_stable)
+        if control:
+            text += "\n[soulcore·已执行聊天指令] " + control
+        state = self._user_states.get(self._cache_key(ev), "")
+        if state == "distress":
+            text += "\n对方在诉说自己的难受，先回应他的感受。"
         self.cost["inject_chars_total"] += len(text)
         self.cost["inject_count"] += 1
         return {"text": text, "mood": ctx["mood"], "label": ctx["label"],
-                "memories": ctx["memories"] if mems else []}
+                "memories": ctx["memories"] if mems else [], "stable": self.stable_block(ev.to_dict())}
 
     def _memory_style_text(self, mems) -> str:
         """memory 风格：只有 `- decision·3天前：…` 这种行，程序员一眼能读懂。
@@ -646,7 +829,8 @@ class Engine:
         for it in mems:
             t = it.valid_from if it.valid_from is not None else it.created
             stale = "（已过时）" if it.invalid_at else ""
-            line = f"- {it.kind}·{_ago(self.clock() - t)}：{stale}{it.content}"
+            note = f"（注意：{it.stale_note}）" if getattr(it, "stale_note", "") else ""
+            line = f"- {it.kind}·{_ago(self.clock() - t)}：{stale}{it.content}{note}"
             if n + len(line) > budget:
                 break
             lines.append(line)
@@ -656,9 +840,12 @@ class Engine:
     def remember(self, ev: Event, content: str, kind: str = "fact", importance: float = 0.85) -> int | None:
         """模型通过工具主动记住某事。这是主人授意的写入：绕过墓碑，可信度仍按来源算。"""
         path = ev.path if kind in ("decision", "todo") or ev.scene == "project" and kind != "preference" else self._person_path(ev)
+        from .timeparse import parse_followup
         with self.lock:
             return self.store.write(path, kind, content, importance, tags=["explicit"],
-                                    trust=self._trust(ev), by_tombstone_ok=True)
+                                    due_at=parse_followup(content, ev.ts),
+                                    trust=self._trust(ev), by_tombstone_ok=True, user_id=ev.user_id,
+                                    audience=self._audience(ev), source_path=ev.path)
 
     def card_text(self) -> str:
         return self.card
@@ -814,11 +1001,11 @@ class Engine:
         with self.lock:
             owner = self.store.db.execute(
                 "SELECT * FROM items WHERE (path='core/people/owner' OR path LIKE 'core/people/owner/%') "
-                "AND trust='owner' AND invalid_at IS NULL AND status NOT IN ('deleted','merged') "
+                "AND trust='owner' AND audience IN ('owner','public') AND invalid_at IS NULL AND status NOT IN ('deleted','merged') "
                 "ORDER BY COALESCE(pinned,0) DESC, importance DESC, last_access DESC LIMIT 40").fetchall()
             mine = self.store.db.execute(
                 "SELECT * FROM items WHERE (path='core/self' OR path LIKE 'core/self/%') AND trust='owner' "
-                "AND invalid_at IS NULL AND status NOT IN ('deleted','merged') "
+                "AND audience IN ('owner','public') AND invalid_at IS NULL AND status NOT IN ('deleted','merged') "
                 "ORDER BY COALESCE(pinned,0) DESC, importance DESC, last_access DESC LIMIT 15").fetchall()
         return list(owner), list(mine)
 
@@ -826,7 +1013,7 @@ class Engine:
         with self.lock:
             row = self.store.db.execute(
                 "SELECT COUNT(*) FROM items WHERE (path LIKE 'core/people/owner%' OR path LIKE 'core/self%') "
-                "AND trust='owner' AND invalid_at IS NULL AND status NOT IN ('deleted','merged') "
+                "AND trust='owner' AND audience IN ('owner','public') AND invalid_at IS NULL AND status NOT IN ('deleted','merged') "
                 "AND created >= ?", (since,)).fetchone()
         return int(row[0] if row else 0)
 
@@ -844,8 +1031,13 @@ class Engine:
                 return False
             if self._profile_changed(last) < 3:
                 return False
+        revision = self.store.meta_get("memory_revision", 0)
         owner_rows, self_rows = self._profile_inputs()
         if not owner_rows and not self_rows:
+            self.store.meta_set("profile_owner", "")
+            self.store.meta_set("profile_self", "")
+            self.store.meta_set("reflect_at", now)
+            self.store.meta_set("profile_dirty", False)
             return False
         text = "\n".join(f"- [{r['kind']}] {core_text(r['content'])}" for r in owner_rows + self_rows)
         prof = {}
@@ -855,16 +1047,19 @@ class Engine:
             prof = got if isinstance(got, dict) else {}
         except Exception as ex:
             log.info("画像调用失败，用规则版：%s", ex)
-        owner = str(prof.get("owner") or "").strip()[:250]
-        mine = str(prof.get("self") or "").strip()[:150]
+        owner = str(prof.get("owner") or "").strip()[:250] if owner_rows else ""
+        mine = str(prof.get("self") or "").strip()[:150] if self_rows else ""
         if not owner:
             owner = _join_profile(owner_rows, 250)
         if not mine:
             mine = _join_profile(self_rows, 150)
-        self.store.meta_set("profile_owner", owner)
-        self.store.meta_set("profile_self", mine)
-        self.store.meta_set("reflect_at", now)
-        self.store.meta_set("profile_dirty", False)
+        with self.lock:
+            if self.store.meta_get("memory_revision", 0) != revision:
+                return False
+            self.store.meta_set("profile_owner", owner)
+            self.store.meta_set("profile_self", mine)
+            self.store.meta_set("reflect_at", now)
+            self.store.meta_set("profile_dirty", False)
         return bool(owner or mine)
 
     def _merge_cost(self) -> None:
@@ -889,6 +1084,30 @@ class Engine:
             self._advance()
             res = self.store.maintain()
             self._save_emotion()
+        # 空闲的短对话也会被提炼；重启后从原始 turn 恢复尚未处理的会话。
+        with self.lock:
+            idle_rows = self.store.db.execute(
+                "SELECT path, MAX(id) AS last_id FROM items WHERE kind='turn' AND role='user' "
+                "AND status!='deleted' GROUP BY path").fetchall()
+        for row in idle_rows:
+            path = row["path"]
+            ev = self._last_events.get(path)
+            if ev is None:
+                with self.lock:
+                    turn = self.store.db.execute("SELECT * FROM items WHERE id=?", (row["last_id"],)).fetchone()
+                parts = path.split("/")
+                if parts[0] == "project":
+                    ev = Event("local", "project", "/".join(parts[1:]), turn["user_id"] or "owner", turn["speaker"] or "", ts=turn["created"])
+                elif len(parts) >= 4 and parts[0] == "chat":
+                    ev = Event(parts[1], parts[2], "/".join(parts[3:]), turn["user_id"] or "", turn["speaker"] or "", ts=turn["created"])
+                elif len(parts) == 3 and parts[:2] == ["chat", "local"]:
+                    ev = Event("local", "session", parts[2], turn["user_id"] or "owner", turn["speaker"] or "", ts=turn["created"])
+            if ev is not None:
+                try:
+                    self._maybe_extract(ev)
+                except Exception as ex:
+                    log.info("空闲抽取保留重试：%s", ex)
+        self.flush()
         merged = 0
         for path, turns in self.store.consolidation_candidates(self.mcfg.get("consolidate_min", 30)):
             s = summarize(self.llm, turns)

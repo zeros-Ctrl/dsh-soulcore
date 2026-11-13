@@ -10,6 +10,7 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from soulcore.config import load_config
@@ -17,7 +18,8 @@ from soulcore.engine import Engine
 from soulcore.events import Event
 from soulcore.memory import MemoryStore, SCHEMA_VERSION
 from soulcore.llm import MockLLM
-from soulcore.extractor import (EXTRACT_SYS, compact_turn, is_phatic, worth_extracting)
+from soulcore.extractor import (EXTRACT_SYS, compact_turn, is_phatic, worth_extracting,
+                               extract_full, heuristic_extract)
 from soulcore.persona import DEFAULT_CARD, make_anchor, detect_slips
 from soulcore.timeparse import query_window, wants_history
 from soulcore.conflicts import find_superseded
@@ -306,6 +308,34 @@ class TestConflicts(Base):
 
 # ====================================================================== T3 提炼里的"更新阶段"
 class TestExtractUpdate(Base):
+    def test_temporary_style_and_emotion_are_not_long_term(self):
+        statements = ("记住今天别开玩笑", "我今天不喜欢吃辣",
+                      "我生气时再也不想出门", "我一直喜欢吃辣")
+        turns = [SimpleNamespace(speaker="主人", role="user", content=s, created=self.clock())
+                 for s in statements]
+        llm = RecordingLLM(reply={"memories": [
+            {"kind": "fact", "content": statements[0]},
+            {"kind": "preference", "content": statements[1]},
+            {"kind": "self", "content": statements[2]},
+            {"kind": "preference", "content": statements[3]}],
+            "persona_slips": ["别说自己是 AI", "别用敬语"]})
+        result = extract_full(llm, turns, "session/chat", strict=True)
+        self.assertEqual([m["content"] for m in result["memories"]], [statements[3]])
+        self.assertEqual(result["persona_slips"], ["别用敬语"])
+        fallback = heuristic_extract("\n".join("主人: " + s for s in statements), self.clock())
+        self.assertEqual([m["content"] for m in fallback], ["主人说：" + statements[3]])
+
+    def test_strict_extraction_keeps_model_failure_visible(self):
+        turns = [SimpleNamespace(speaker="主人", role="user", content="我一直喜欢吃辣",
+                                 created=self.clock())]
+        def fail(_):
+            raise RuntimeError("offline")
+
+        llm = RecordingLLM(reply=fail)
+        with self.assertRaisesRegex(RuntimeError, "offline"):
+            extract_full(llm, turns, "session/chat", strict=True)
+        self.assertTrue(extract_full(llm, turns, "session/chat")["memories"])
+
     def test_llm_replaces_whitelist(self):
         llm = RecordingLLM(reply=lambda msgs: {
             "memories": [{"kind": "fact", "content": "主人住在上海浦东", "about": "user",
@@ -638,9 +668,10 @@ class TestPersona(Base):
     def test_slip_detected_and_injected(self):
         eng, _ = make_engine(self.tmp, self.clock)
         ev = Event("local", "project", "p", "owner", "主人", "你好", mentions_self=True, ts=self.clock())
-        eng.commit_reply(ev, "作为一个AI，我会努力学习。")
-        self.assertTrue(detect_slips("作为一个AI，我会努力学习。", "local"))
-        self.assertIn("别说'作为AI", eng.context_block(
+        self.assertEqual(detect_slips("作为一个AI，我没有现实中的身体。", "local"), [])
+        eng.commit_reply(ev, "希望对你有帮助。")
+        self.assertTrue(detect_slips("希望对你有帮助。", "local"))
+        self.assertIn("别用客服式结尾", eng.context_block(
             Event("local", "project", "p", "owner", "主人", "继续", mentions_self=True,
                   ts=self.clock()))["text"])
         eng.close()
@@ -655,9 +686,9 @@ class TestPersona(Base):
         self.assertNotIn("希望对你有帮助", text)
         eng.close()
 
-    def test_md_list_not_flagged_in_local(self):
-        self.assertEqual(detect_slips("1. 改这里\n2. 再改那\n3. 最后跑测试", "local"), [])
-        self.assertTrue(detect_slips("1. 改这里\n2. 再改那\n3. 最后跑测试", "qq"))
+    def test_task_lists_not_flagged_by_platform(self):
+        for platform in ("local", "qq"):
+            self.assertEqual(detect_slips("1. 改这里\n2. 再改那\n3. 最后跑测试", platform), [])
 
     def test_context_lines_keep_time(self):
         """复审 S1：注入行要带"多久以前"，并且按 valid_from 算，不要出现 `·]` 这种多余的点"""

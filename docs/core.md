@@ -21,7 +21,7 @@ Claude Code ── hooks ─────────────┤           �
 python -m soulcore --mock showcase               # 三段对照演示（新会话还记得 / 过时说法 / 心情变化），< 30 秒
 python -m soulcore --mock demo                   # 模拟一整天：QQ 私聊/群聊、B站评论、项目讨论、余额变化
 python -m soulcore --mock chat --project 毕设     # 命令行聊天：/help、/skip 快进时间、/event 触发情绪、/mem 查记忆
-python -m unittest discover -s tests             # 261 个 Python 测试
+python -m unittest discover -s tests             # 离线 Python 测试
 ```
 
 ## 2. 配置与启动
@@ -126,5 +126,6 @@ python -I bench/eval_longmem.py . ../docs/benchmark/longmem_v09.json --split-sta
 ## 9. 历史文档
 
 - [v0.8-review.md](./v0.8-review.md)、[v0.8.1-fixes.md](./v0.8.1-fixes.md)：上一轮复审与修复记录
-- [v0.9-delivery.md](./v0.9-delivery.md)：本版本交付说明（每个任务落在哪、和任务书的差异、验证记录）
+- [v0.9-delivery.md](./v0.9-delivery.md)：0.9 交付说明（任务落点与验证记录）
+- [chat.md](./chat.md)、[install.md](./install.md)：0.10 的聊天控制与下载安装说明
 - [benchmark/LONGMEM.md](./benchmark/LONGMEM.md)：200 天长记忆评测的方法和数据

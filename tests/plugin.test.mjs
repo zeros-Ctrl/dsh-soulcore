@@ -118,15 +118,14 @@ test('压缩前抢救：compaction 请求里的原文被提炼成长期记忆', 
   const [{ fn, opts }] = ctx.listeners['llm/stream']
   assert.equal(opts.global, true)
   let passed = false
-  fn({ purpose: 'compaction', sessionId: 's1', messages: [
+  await fn({ purpose: 'compaction', sessionId: 's1', messages: [
     { role: 'system', content: [{ type: 'text', text: 'sys' }] },
     userMsg('我们决定日志改用 JSONL，不用 CSV 了，因为要追加写'),
     { role: 'assistant', content: [{ type: 'text', text: '好的' }], source: { kind: 'model' } },
     { role: 'user', content: [{ type: 'text', text: 'Summarize the conversation' }], source: { kind: 'compaction' } },
   ] }, () => { passed = true })
   assert.ok(passed, '必须继续调用 next()')
-  fn({ purpose: 'main', messages: [] }, () => {})
-  for (let i = 0; i < 30 && plugin.stats.compactions === 0; i++) await new Promise((r) => setTimeout(r, 100))
+  await fn({ purpose: 'main', messages: [] }, () => {})
   assert.equal(plugin.stats.compactions, 1)
   const r = await ctx.registered.memory_search.execute({ query: '日志 JSONL' }, { agent: agent() })
   assert.match(r.text, /JSONL/)

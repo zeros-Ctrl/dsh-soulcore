@@ -24,7 +24,7 @@ from .conflicts import find_superseded, core_text
 log = logging.getLogger("soulcore")
 
 INDEX_VERSION = 2   # v2：索引里加入概念 token（见 concepts.py）
-SCHEMA_VERSION = 5  # v2：trust/pinned/时间轴/墓碑；v3：due_at；v4：失效机制启用；v5：摘要上的 stale_note
+SCHEMA_VERSION = 6  # v6：聊天可见范围 audience 与原始来源 source_path
 
 # 同类组：同一个槽位只该有一个当前值，所以只在组内找"被取代"的旧条目
 _KIND_GROUPS = (("fact", "preference", "person", "self"), ("decision",), ("todo",))
@@ -103,7 +103,9 @@ CREATE TABLE IF NOT EXISTS items(
   invalid_at REAL,
   superseded_by INTEGER,
   due_at REAL,
-  stale_note TEXT
+  stale_note TEXT,
+  audience TEXT DEFAULT 'public',
+  source_path TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS ix_items_path ON items(path, kind, status);
 CREATE INDEX IF NOT EXISTS ix_items_created ON items(created);
@@ -118,7 +120,9 @@ CREATE TABLE IF NOT EXISTS tombstones(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   fp TEXT NOT NULL,
   content TEXT NOT NULL,
-  created REAL NOT NULL
+  created REAL NOT NULL,
+  audience TEXT DEFAULT '*',
+  user_id TEXT DEFAULT ''
 );
 """
 
@@ -131,6 +135,8 @@ _MIGRATIONS = {
     "superseded_by": "INTEGER",
     "due_at": "REAL",          # 适合跟进的时刻（主动聊天的"跟进"念头用）
     "stale_note": "TEXT",      # 摘要里有过时说法时的备注（不失效整条摘要）
+    "audience": "TEXT DEFAULT 'public'",
+    "source_path": "TEXT DEFAULT ''",
 }
 
 # 老条目没有 trust：按路径回填。保守起见，群聊/评论区一律降级。
@@ -169,6 +175,8 @@ class Item:
     score: float = 0.0
     weight_now: float = 0.0
     rel: float = 0.0        # 只算"相关性"、不算权重和时间衰减的得分（冷存储回想按它判断值不值得捞）
+    audience: str = "public"
+    source_path: str = ""
 
 
 class MemoryStore:
@@ -204,7 +212,7 @@ class MemoryStore:
 
     # ================= 迁移 =================
     def _migrate(self) -> None:
-        """给老库补列并回填 trust。新库此时已是 v2，不做事。"""
+        """给旧库补列，按原路径回填来源与聊天可见范围。"""
         cols = {r["name"] for r in self.db.execute("PRAGMA table_info(items)")}
         added = [name for name in _MIGRATIONS if name not in cols]
         for name in added:
@@ -215,8 +223,16 @@ class MemoryStore:
                 self.db.execute("UPDATE items SET trust=? WHERE path LIKE ?", (level, pat))
         self.db.execute("UPDATE items SET trust='owner' WHERE trust IS NULL OR trust=''")
         self.db.execute("CREATE INDEX IF NOT EXISTS ix_items_trust ON items(trust)")
-        if added:
-            self.db.commit()
+        if "audience" in added:
+            for row in self.db.execute("SELECT id,path,trust FROM items").fetchall():
+                self.db.execute("UPDATE items SET audience=?,source_path=? WHERE id=?",
+                                (self._default_audience(row["path"], row["trust"]),
+                                 row["path"] if row["path"].startswith(("chat/", "project/")) else "", row["id"]))
+        tombstone_cols = {r["name"] for r in self.db.execute("PRAGMA table_info(tombstones)")}
+        for name, declaration in (("audience", "TEXT DEFAULT '*'"), ("user_id", "TEXT DEFAULT ''")):
+            if name not in tombstone_cols:
+                self.db.execute(f"ALTER TABLE tombstones ADD COLUMN {name} {declaration}")
+        self.db.commit()
         if self.meta_get("schema_version", 1) < SCHEMA_VERSION:
             self.meta_set("schema_version", SCHEMA_VERSION)
 
@@ -226,7 +242,7 @@ class MemoryStore:
               ts: float | None = None, mirror: bool = True, trust: str = "owner",
               pinned: bool = False, by_tombstone_ok: bool = False,
               due_at: float | None = None, valid_from: float | None = None,
-              reconcile: bool = True) -> Optional[int]:
+              reconcile: bool = True, audience: str | None = None, source_path: str = "") -> Optional[int]:
         """写一条记忆。
 
         trust          来源可信度（见 TRUST_LEVELS）。检索时按场景过滤，默认 owner。
@@ -241,6 +257,9 @@ class MemoryStore:
             return None
         now = ts if ts is not None else self.clock()
         trust = trust if trust in TRUST_RANK else "owner"
+        user_id = str(user_id or "")
+        audience = str(audience) if audience is not None else self._default_audience(path, trust)
+        source_path = str(source_path or (path if path.startswith(("chat/", "project/")) else ""))
         tau = float(self.tau.get(kind, 72))
         if kind == "turn" and "/group/" in path:
             tau *= self.group_turn_tau_scale
@@ -248,20 +267,21 @@ class MemoryStore:
         merged = None
         replaced: list[int] = []
         with self.lock:
-            if kind != "turn" and not by_tombstone_ok and self._tombstoned(content):
+            if kind != "turn" and not by_tombstone_ok and self._tombstoned(content, audience=audience, user_id=user_id):
                 return None      # 用户删过这条：自动提炼不再把它复活
             if reconcile and kind != "turn" and self.auto_supersede:
-                replaced = self._reconcile(path, kind, content)
+                replaced = self._reconcile(path, kind, content, user_id=user_id, audience=audience)
             if not replaced and dedup and kind != "turn":
-                dup = self._find_duplicate(path, kind, content)
+                dup = self._find_duplicate(path, kind, content, user_id=user_id, audience=audience)
                 if dup is not None:
                     merged = self._merge_duplicate(dup, path, kind, content, importance, now, tag_s, trust)
             if merged is None:
                 cur = self.db.execute(
                     "INSERT INTO items(path,kind,role,speaker,content,importance,tau_h,created,last_access,"
-                    "tags,user_id,trust,pinned,valid_from,due_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "tags,user_id,trust,pinned,valid_from,due_at,audience,source_path) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (path, kind, role, speaker, content, float(importance), tau, now, now, tag_s, user_id,
-                     trust, 1 if pinned else 0, valid_from if valid_from is not None else now, due_at))
+                     trust, 1 if pinned else 0, valid_from if valid_from is not None else now, due_at,
+                     audience, source_path))
                 iid = cur.lastrowid
                 self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)",
                                 (iid, index_text(content + " " + tag_s + " " + speaker)))
@@ -271,6 +291,10 @@ class MemoryStore:
                 if due_at is not None:
                     self.db.execute("UPDATE items SET due_at=? WHERE id=? AND due_at IS NULL", (due_at, iid))
                     self.db.commit()
+        if kind != "turn":
+            with self.lock:
+                self._changed()
+                self.db.commit()
         # 知识更新：新写法明确改了旧值 → 旧条目失效（不删除，问"以前"时还能召回）
         for old in replaced:
             self.supersede(old, iid, at=now, new_trust=trust)
@@ -334,38 +358,76 @@ class MemoryStore:
             n += self._embed_ids([(r["id"], r["content"] + " " + (r["tags"] or "")) for r in rows[i:i + batch]])
         return n
 
-    def _find_duplicate(self, path: str, kind: str, content: str, thr: float = 0.75) -> Optional[int]:
+    @staticmethod
+    def _default_audience(path: str, trust: str = "owner") -> str:
+        if (path == "core/people/local/owner" or path.startswith("core/people/local/owner/")
+                or path == "core/people/owner" or path.startswith("core/people/owner/")):
+            return "owner"
+        if path == "core/self" or path.startswith("core/self/"):
+            return "owner" if trust == "owner" else "legacy-private"
+        if path.startswith("core/people/"):
+            parts = path.split("/")
+            if len(parts) >= 4:
+                return "chat/%s/%s/%s" % (parts[2], "dm" if parts[2] == "bilibili" else "private", parts[3])
+            return "legacy-private"
+        if "/private/" in path or "/dm/" in path:
+            return "owner" if trust == "owner" else path
+        if path.startswith("project/"):
+            return "owner" if trust == "owner" else path
+        if path.startswith("chat/"):
+            return path
+        return "public"
+
+    @staticmethod
+    def _author_filter(path: str, user_id: str) -> tuple[str, tuple]:
+        if "/group/" in path or "/comment/" in path:
+            return " AND COALESCE(items.user_id,'')=?", (str(user_id or ""),)
+        if user_id:
+            return " AND (COALESCE(items.user_id,'')=? OR COALESCE(items.user_id,'')='')", (str(user_id),)
+        return "", ()
+
+    def _changed(self, clear_profiles: bool = False) -> None:
+        """改变记忆内容/有效性时更新缓存版本；普通原话追加与复习不触发。"""
+        revision = int(self.meta_get("memory_revision", 0) or 0) + 1
+        self.db.execute("INSERT OR REPLACE INTO meta(k,v) VALUES('memory_revision',?)", (str(revision),))
+        if clear_profiles:
+            for key, value in (("profile_dirty", "true"), ("profile_owner", '""'), ("profile_self", '""')):
+                self.db.execute("INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", (key, value))
+
+    def _find_duplicate(self, path: str, kind: str, content: str, thr: float = 0.75, *,
+                        user_id: str = "", audience: str = "public") -> Optional[int]:
         q = fts_query(content)
         if not q:
             return None
+        author_sql, author_args = self._author_filter(path, user_id)
         rows = self.db.execute(
             "SELECT items.id, items.content FROM items_fts JOIN items ON items.id=items_fts.rowid "
-            "WHERE items_fts MATCH ? AND items.path=? AND items.kind=? "
+            "WHERE items_fts MATCH ? AND items.path=? AND items.kind=? AND items.audience=? "
             "AND items.status NOT IN ('merged','deleted') AND items.invalid_at IS NULL "
-            "ORDER BY bm25(items_fts) LIMIT 5", (q, path, kind)).fetchall()
+            + author_sql + " ORDER BY bm25(items_fts) LIMIT 5",
+            (q, path, kind, audience, *author_args)).fetchall()
         for r in rows:
             if jaccard(r["content"], content) >= thr:
                 return r["id"]
         return None
 
-    # ================= 知识更新：旧条目失效（不删除） =================
-    def _reconcile(self, path: str, kind: str, content: str) -> list[int]:
-        """规则版冲突检测：返回这条新内容应该取代的旧条目 id。
-
-        只在同一路径、同一类组、还没失效的条目里找。"宁可漏判"由 conflicts.py 保证。
-        """
+    def _reconcile(self, path: str, kind: str, content: str, *, user_id: str = "",
+                   audience: str | None = None) -> list[int]:
+        """仅同一个发言者的同类事实可以互相取代；旧库空 ID 在非群聊路径兼容。"""
         group = _kind_group(kind)
-        if not group:
-            return []
         q = fts_query(content)
-        if not q:
+        if not group or not q:
             return []
         marks = ",".join("?" * len(group))
+        author_sql, author_args = self._author_filter(path, user_id)
+        if audience is not None:
+            author_sql += " AND items.audience=?"
+            author_args += (audience,)
         rows = self.db.execute(
             "SELECT items.id, items.content, items.kind FROM items_fts JOIN items ON items.id=items_fts.rowid "
             f"WHERE items_fts MATCH ? AND items.path=? AND items.kind IN ({marks}) "
             "AND items.status NOT IN ('merged','deleted') AND items.invalid_at IS NULL "
-            "ORDER BY bm25(items_fts) LIMIT 10", (q, path, *group)).fetchall()
+            + author_sql + " ORDER BY bm25(items_fts) LIMIT 10", (q, path, *group, *author_args)).fetchall()
         return find_superseded(content, [(r["id"], r["content"], r["kind"]) for r in rows])
 
     def supersede(self, old_id: int, new_id: int | None, *, at: float | None = None,
@@ -390,7 +452,7 @@ class MemoryStore:
                 return False
         with self.lock:
             r = self.db.execute(
-                "SELECT id, path, kind, trust, status, invalid_at FROM items WHERE id=?", (old_id,)).fetchone()
+                "SELECT id, path, kind, trust, user_id, audience, status, invalid_at FROM items WHERE id=?", (old_id,)).fetchone()
             if r is None or r["invalid_at"] is not None:
                 return False
             if r["status"] in ("deleted", "merged") or r["kind"] == "turn":
@@ -398,6 +460,11 @@ class MemoryStore:
             if TRUST_RANK.get(new_trust, 3) < TRUST_RANK.get(r["trust"] or "owner", 3):
                 log.info("拒绝用 %s 来源的记忆取代 #%s（%s）", new_trust, old_id, r["trust"])
                 return False
+            if new_id is not None:
+                new = self.db.execute("SELECT user_id,audience FROM items WHERE id=?", (new_id,)).fetchone()
+                if (new is None or r["audience"] != new["audience"]
+                        or (r["user_id"] and new["user_id"] and r["user_id"] != new["user_id"])):
+                    return False
             at = self.clock() if at is None else at
             path, kind = r["path"], r["kind"]
             self.db.execute("UPDATE items SET invalid_at=?, superseded_by=? WHERE id=?",
@@ -407,6 +474,7 @@ class MemoryStore:
             if owner_like:
                 # 画像里抄了一份旧说法：标脏，下次 tick 用有效条目重算
                 self.db.execute("INSERT OR REPLACE INTO meta(k,v) VALUES('profile_dirty','true')")
+            self._changed(clear_profiles=owner_like)
             self.db.commit()
         self._annotate_mirror_line(path, kind, old_id, "superseded_by=%d" % (new_id or 0))
         return True
@@ -417,7 +485,7 @@ class MemoryStore:
         整条失效会把摘要里的其他信息一起藏起来（"注册上限每天 20 个"跟着"部署在香橙派"一起消失）。
         渲染时在行尾追加"（注意：…已过时，现为…）"，旧说法不冒充现状，其他内容还在。
         """
-        r = self.db.execute("SELECT content FROM items WHERE id=?", (old_id,)).fetchone()
+        r = self.db.execute("SELECT content,source_path FROM items WHERE id=?", (old_id,)).fetchone()
         old_tokens = set(tokens(r["content"])) if r else set()
         if len(old_tokens) < 3:
             return
@@ -429,8 +497,9 @@ class MemoryStore:
         old_short = core_text(str(r["content"]))[:24]
         note = f"其中「{old_short}」已过时" + (f"（现在：{new_short}）" if new_short else "")
         rows = self.db.execute(
-            "SELECT id, content, stale_note FROM items WHERE path=? AND kind='summary' "
-            "AND invalid_at IS NULL AND status NOT IN ('deleted','merged') LIMIT 200", (path,)).fetchall()
+            "SELECT id, content, stale_note FROM items WHERE (path=? OR path=?) AND kind='summary' "
+            "AND invalid_at IS NULL AND status NOT IN ('deleted','merged') LIMIT 200",
+            (path, r["source_path"] or path)).fetchall()
         for x in rows:
             st = set(tokens(x["content"]))
             if not st or len(old_tokens & st) / len(old_tokens) < 0.6:
@@ -445,12 +514,17 @@ class MemoryStore:
     def _fp(content: str) -> str:
         return " ".join(sorted(set(tokens(content))))
 
-    def _tombstoned(self, content: str) -> bool:
+    def _tombstoned(self, content: str, *, audience: str | None = None, user_id: str = "") -> bool:
         fp = self._fp(content)
         if not fp:
             return False
         sa = set(fp.split())
-        for r in self.db.execute("SELECT fp FROM tombstones ORDER BY id DESC LIMIT 1000"):
+        sql = "SELECT fp FROM tombstones"
+        args: tuple = ()
+        if audience is not None:
+            sql += " WHERE audience='*' OR (audience=? AND COALESCE(user_id,'')=?)"
+            args = (audience, str(user_id or ""))
+        for r in self.db.execute(sql + " ORDER BY id DESC LIMIT 1000", args):
             sb = set((r["fp"] or "").split())
             if not sb:
                 continue
@@ -458,14 +532,17 @@ class MemoryStore:
                 return True
         return False
 
-    def add_tombstone(self, content: str) -> bool:
+    def add_tombstone(self, content: str, *, audience: str = "*", user_id: str = "") -> bool:
         fp = self._fp(content)
         if not fp:
             return False
-        if self.db.execute("SELECT 1 FROM tombstones WHERE fp=?", (fp,)).fetchone():
+        user_id = str(user_id or "")
+        if self.db.execute(
+                "SELECT 1 FROM tombstones WHERE fp=? AND audience=? AND COALESCE(user_id,'')=?",
+                (fp, audience, user_id)).fetchone():
             return False
-        self.db.execute("INSERT INTO tombstones(fp, content, created) VALUES(?,?,?)",
-                        (fp, content[:500], self.clock()))
+        self.db.execute("INSERT INTO tombstones(fp,content,created,audience,user_id) VALUES(?,?,?,?,?)",
+                        (fp, content[:500], self.clock(), audience, user_id))
         self.db.commit()
         return True
 
@@ -485,25 +562,27 @@ class MemoryStore:
         return it["importance"] * math.exp(-dt_h / it["tau_h"]) * boost
 
     def touch(self, ids: Iterable[int], now: float | None = None) -> int:
-        """只有"真的用到"才刷新：衰减计时归零、访问次数 +1、从冷存储拉回。"""
-        ids = [int(i) for i in ids]
+        """只有真的用到才刷新；被删除或失效的条目不能复活。"""
+        ids = list(dict.fromkeys(int(i) for i in ids))
         if not ids:
             return 0
         now = now if now is not None else self.clock()
         with self.lock:
-            self.db.executemany(
-                "UPDATE items SET last_access=?, access_count=access_count+1, status='hot' WHERE id=?",
+            cur = self.db.executemany(
+                "UPDATE items SET last_access=?, access_count=access_count+1, status='hot' "
+                "WHERE id=? AND status IN ('hot','cold') AND invalid_at IS NULL",
                 [(now, i) for i in ids])
             self.db.commit()
-        return len(ids)
+            return cur.rowcount
 
     # ================= 输出门：分层检索 =================
+
     def search(self, query: str, path: str, *, k: int = 8, extra_paths: Iterable[str] = (),
                include_turns: bool = True, min_score: float = 0.02, touch: bool = True,
                include_cold: bool = False, public: bool = False, allow_projects: bool = True,
                allowed_trusts: Iterable[str] | None = None, count: bool = True,
                include_history: bool = False, window: tuple[float, float] | None = None,
-               only_cold: bool = False) -> list[Item]:
+               only_cold: bool = False, allowed_audiences: Iterable[str] | None = None) -> list[Item]:
         """先搜当前分支子树，结果不够就逐级回退：父分支 → ... → core → 全局（全局打折最狠）
 
         隐私规则（回退到别的分支时生效）：
@@ -511,8 +590,8 @@ class MemoryStore:
           - 别人的私聊、私信、人物档案永远不可见
           - allow_projects=False 时项目记忆不可见（QQ/B站场景默认如此）
           - public=True（B站评论区等公开场景）时，其他聊天分支的内容一律不可见
-          - allowed_trusts：跨分支回退时只召回这些可信级别的条目。本分支不受限
-            （本群/本私聊里的人说的话，本来就属于这个场景）。None 表示不限制（调试用）。
+          - allowed_trusts / allowed_audiences：所有分支均受过滤，包括当前分支和额外分支。
+            None 表示不限制（本地管理/调试用）。
 
         include_history：失效（被取代/作废）的条目也召回，分数打 6 折并标"已过时"——问"以前那件事"时用。
         window：(起, 止)：问句里解析出的过去时间窗。落在窗口内的条目加分，并在没实词时按时间直接取。
@@ -558,19 +637,22 @@ class MemoryStore:
             hidden.append("chat/%")
         hidden_sql = " OR ".join("items.path LIKE '%s'" % h for h in hidden)
         trusts = [t for t in (allowed_trusts or ()) if t in TRUST_RANK]
-        trust_sql = (" AND items.trust IN (%s)" % ",".join("?" * len(trusts))) if trusts else ""
+        trust_sql = ((" AND items.trust IN (%s)" % ",".join("?" * len(trusts))) if trusts
+                     else (" AND 0" if allowed_trusts is not None else ""))
         targs = tuple(trusts)
-        # 只有当前分支本身不受可信度限制；额外分支（对方档案、core/self）和回退分支都要过滤，
-        # 否则群里陌生人诱导出的 core/self 条目会经由 extra_paths 进入本地 agent 的上下文。
+        audiences = list(dict.fromkeys(allowed_audiences or ()))
+        audience_sql = ((" AND items.audience IN (%s)" % ",".join("?" * len(audiences))) if audiences
+                        else (" AND 0" if allowed_audiences is not None else ""))
+        # 来源可信度和可见范围同时约束当前、额外及回退分支。
         extra_in = ("items.path IN (%s) OR " % ",".join("?" * len(extras))) if extras else ""
-        priv_sql = (" AND (items.path=? OR ((%s(items.kind!='turn' AND NOT (%s)))%s))"
+        priv_sql = (" AND (items.path=? OR %s(items.kind!='turn' AND NOT (%s)))%s"
                     % (extra_in, hidden_sql, trust_sql))
         pargs = (path, *extras, *targs)
         with self.lock:
             for si, (scope, d) in enumerate(scopes):
                 if scope == path:
-                    where = f"(items.path=? OR items.path LIKE ?) AND {status_sql}{kind_sql}"
-                    wargs: tuple = (scope, scope + "/%")
+                    where = f"(items.path=? OR items.path LIKE ?) AND {status_sql}{kind_sql}{trust_sql}"
+                    wargs: tuple = (scope, scope + "/%", *targs)
                 elif scope in extras:
                     where = f"(items.path=? OR items.path LIKE ?) AND {status_sql}{kind_sql}{trust_sql}"
                     wargs = (scope, scope + "/%", *targs)
@@ -580,6 +662,8 @@ class MemoryStore:
                 else:
                     where = f"{status_sql}{kind_sql}{priv_sql}"
                     wargs = pargs
+                where += audience_sql
+                wargs = (*wargs, *audiences)
                 cand: dict[int, list] = {}   # id -> [row, 字词相关度, 语义相关度]
                 if q:
                     for r in self.db.execute(
@@ -653,12 +737,14 @@ class MemoryStore:
             if touch and res:
                 if count:
                     self.db.executemany(
-                        "UPDATE items SET last_access=?, access_count=access_count+1, status='hot' WHERE id=?",
+                        "UPDATE items SET last_access=?, access_count=access_count+1, status='hot' "
+                        "WHERE id=? AND status IN ('hot','cold') AND invalid_at IS NULL",
                         [(now, it.id) for it in res])
                 else:
                     # 只刷新"多久没想起"，不增加访问次数——避免"越注入越重要"的正反馈
                     self.db.executemany(
-                        "UPDATE items SET last_access=?, status='hot' WHERE id=?",
+                        "UPDATE items SET last_access=?, status='hot' "
+                        "WHERE id=? AND status IN ('hot','cold') AND invalid_at IS NULL",
                         [(now, it.id) for it in res])
                 self.db.commit()
         return res
@@ -678,14 +764,20 @@ class MemoryStore:
     def recent_turns(self, path: str, n: int = 12) -> list[Item]:
         with self.lock:
             rows = self.db.execute(
-                "SELECT * FROM items WHERE path=? AND kind='turn' ORDER BY created DESC, id DESC LIMIT ?",
+                "SELECT * FROM items WHERE path=? AND kind='turn' AND status!='deleted' "
+                "ORDER BY created DESC, id DESC LIMIT ?",
                 (path, n)).fetchall()
         return [_item(r) for r in reversed(rows)]
 
-    def by_path(self, path: str, kinds: Iterable[str] | None = None, limit: int = 20) -> list[Item]:
+    def by_path(self, path: str, kinds: Iterable[str] | None = None, limit: int = 20, *,
+                allowed_audiences: Iterable[str] | None = None) -> list[Item]:
         sql = ("SELECT * FROM items WHERE (path=? OR path LIKE ?) AND invalid_at IS NULL "
                "AND (status='hot' OR (COALESCE(pinned,0)=1 AND status='cold'))")
         args: list = [path, path + "/%"]
+        if allowed_audiences is not None:
+            audiences = list(dict.fromkeys(allowed_audiences))
+            sql += (" AND audience IN (%s)" % ",".join("?" * len(audiences))) if audiences else " AND 0"
+            args += audiences
         if kinds:
             kinds = list(kinds)
             sql += " AND kind IN (%s)" % ",".join("?" * len(kinds))
@@ -709,7 +801,8 @@ class MemoryStore:
                 "trust": r["trust"] or "owner", "pinned": bool(r["pinned"]),
                 "created": r["created"], "valid_from": r["valid_from"],
                 "invalid_at": r["invalid_at"], "superseded_by": r["superseded_by"],
-                "stale_note": r["stale_note"]}
+                "stale_note": r["stale_note"], "audience": r["audience"] or "public",
+                "source_path": r["source_path"] or r["path"], "user_id": r["user_id"] or ""}
 
     def timeline(self, limit: int = 20, path: str | None = None, top: bool = False) -> dict:
         """最近的记忆：新增的（recent）和刚被取代的（superseded，带旧值/新值）。
@@ -743,28 +836,55 @@ class MemoryStore:
         return {"recent": recent, "superseded": superseded}
 
     def forget(self, item_id) -> dict | None:
-        """忘掉一条记忆：标 deleted + 墓碑 + 从 Markdown 删掉对应的行。
-
-        - 只允许 owner / known 来源的条目：群里的陌生人不能借接口删主人的记忆；
-        - 墓碑保证"自动提炼"以后不会把它复活（用户主动删掉的内容不再记）。
-        """
+        """管理员/聊天入口验证权限后，撤下记忆、原话及引用该事实的摘要。"""
         try:
             iid = int(item_id)
         except (TypeError, ValueError):
             return None
         with self.lock:
             r = self.db.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone()
-            if r is None or r["kind"] == "turn":
+            if r is None:
                 return None
-            if TRUST_RANK.get(r["trust"] or "owner", 3) < TRUST_RANK["known"]:
-                raise PermissionError("这条记忆的来源不可信（stranger/public），不能删除")
+            derived = self._forget_derived(r)
             self.db.execute("UPDATE items SET status='deleted' WHERE id=?", (iid,))
+            self.add_tombstone(r["content"], audience=r["audience"], user_id=r["user_id"])
+            self._changed(clear_profiles=True)
             self.db.commit()
             brief = self.brief(r)
-            path, kind, content = r["path"], r["kind"], r["content"]
-        self.add_tombstone(content)
-        self._remove_mirror_line(path, kind, iid)
+        # 与 Markdown 同步保持同一锁顺序，不在持有数据库锁时进入 md_lock。
+        for row in [r, *derived]:
+            self._remove_mirror_line(row["path"], row["kind"], row["id"])
         return brief
+
+    def _forget_derived(self, row) -> list:
+        """删除含有旧事实的摘要；调用者负责在释放数据库锁后更新镜像。"""
+        old = set(tokens(core_text(row["content"])))
+        paths = list(dict.fromkeys(p for p in (row["path"], row["source_path"]) if p))
+        clauses = ["parent_id=?"]
+        args: list = [row["id"]]
+        if paths:
+            clauses.append("(kind='summary' AND path IN (%s))" % ",".join("?" * len(paths)))
+            args += paths
+        if row["parent_id"]:
+            clauses.append("id=?")
+            args.append(row["parent_id"])
+        rows = self.db.execute(
+            "SELECT * FROM items WHERE (" + " OR ".join(clauses) + ") "
+            "AND id!=? AND status!='deleted'", (*args, row["id"])).fetchall()
+        derived = []
+        for candidate in rows:
+            direct = candidate["parent_id"] == row["id"] or candidate["id"] == row["parent_id"]
+            if not direct:
+                if (row["user_id"] and candidate["user_id"]
+                        and row["user_id"] != candidate["user_id"]):
+                    continue
+                st = set(tokens(core_text(candidate["content"])))
+                if not old or len(old & st) / len(old) < 0.6:
+                    continue
+            self.db.execute("UPDATE items SET status='deleted' WHERE id=?", (candidate["id"],))
+            self.add_tombstone(candidate["content"], audience=candidate["audience"], user_id=candidate["user_id"])
+            derived.append(candidate)
+        return derived
 
     def restore(self, item_id) -> dict | None:
         """把忘掉 / 被取代的条目恢复成有效记忆。
@@ -786,8 +906,9 @@ class MemoryStore:
             if was_superseded:
                 self.db.execute("UPDATE items SET invalid_at=NULL, superseded_by=NULL WHERE id=?", (iid,))
             self.db.execute("UPDATE items SET status='hot' WHERE id=?", (iid,))
+            self._changed(clear_profiles=True)
             self.db.commit()
-            self._drop_tombstone(content)
+            self._drop_tombstone(content, audience=r["audience"], user_id=r["user_id"])
             row = self.db.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone()
             brief = self.brief(row)
         if was_superseded:
@@ -797,12 +918,16 @@ class MemoryStore:
                          row["created"] or self.clock())
         return brief
 
-    def _drop_tombstone(self, content: str) -> int:
+    def _drop_tombstone(self, content: str, *, audience: str | None = None, user_id: str = "") -> int:
         fp = self._fp(content)
         if not fp:
             return 0
+        sql, args = "DELETE FROM tombstones WHERE fp=?", [fp]
+        if audience is not None:
+            sql += " AND (audience='*' OR (audience=? AND COALESCE(user_id,'')=?))"
+            args += [audience, str(user_id or "")]
         with self.lock:
-            cur = self.db.execute("DELETE FROM tombstones WHERE fp=?", (fp,))
+            cur = self.db.execute(sql, args)
             self.db.commit()
             return cur.rowcount
 
@@ -875,6 +1000,11 @@ class MemoryStore:
                 self.db.execute("UPDATE items SET path=? WHERE path=?", (new, old))
                 self.db.execute("UPDATE items SET path=? || substr(path, ?) WHERE path LIKE ?",
                                 (new, len(old) + 1, old + "/%"))
+                if new == "core/people/owner":
+                    self.db.execute(
+                        "UPDATE items SET audience='owner' WHERE (path=? OR path LIKE ?) "
+                        "AND trust IN ('owner','known')", (new, new + "/%"))
+                self._changed(clear_profiles=True)
                 self.db.commit()
             # Markdown 镜像也要跟着搬：否则新目录的 notes.md 里没有这些行，
             # 下次 sync_markdown() 会把迁过来的条目当成"用户删掉了"（标 deleted + 墓碑）
@@ -965,22 +1095,49 @@ class MemoryStore:
                 out.append((r["path"], [_item(x) for x in its]))
         return out
 
-    def commit_summary(self, path: str, summary: str, source_ids: list[int], importance: float = 0.6) -> int:
-        # 摘要的可信度 = 被摘要原文里最低的那个。否则把群聊摘要变成 owner 会绕过隔离。
-        trust = "owner"
-        rows = self.db.execute(
-            "SELECT trust FROM items WHERE id IN (%s)" % ",".join("?" * len(source_ids)),
-            tuple(source_ids)).fetchall() if source_ids else []
-        for r in rows:
-            trust = stricter(trust, r["trust"] or "owner")
-        sid = self.write(path, "summary", summary, importance, dedup=False, trust=trust)
+    def commit_summary(self, path: str, summary: str, source_ids: list[int],
+                       importance: float = 0.6) -> Optional[int]:
+        # 继承来源的可见范围与最低可信度，摘要不能变成跨聊天公开的 owner 记忆。
+        if not source_ids:
+            return None
         with self.lock:
-            self.db.executemany("UPDATE items SET status='merged', parent_id=? WHERE id=?",
-                                [(sid, i) for i in source_ids])
+            rows = self.db.execute(
+                "SELECT * FROM items WHERE id IN (%s)" % ",".join("?" * len(source_ids)),
+                tuple(source_ids)).fetchall()
+            if len(rows) != len(set(source_ids)) or any(r["status"] == "deleted" for r in rows):
+                return None
+            trust = "owner"
+            for r in rows:
+                trust = stricter(trust, r["trust"] or "owner")
+            audiences = {r["audience"] or self._default_audience(r["path"], r["trust"]) for r in rows}
+            audience = next(iter(audiences)) if len(audiences) == 1 else path
+            users = {r["user_id"] or "" for r in rows}
+            user_id = next(iter(users)) if len(users) == 1 else ""
+            sources = {r["source_path"] or r["path"] for r in rows}
+            source_path = next(iter(sources)) if len(sources) == 1 else path
+        sid = self.write(path, "summary", summary, importance, dedup=False, trust=trust,
+                         user_id=user_id, audience=audience, source_path=source_path)
+        if sid is None:
+            return None
+        with self.lock:
+            deleted = self.db.execute(
+                "SELECT 1 FROM items WHERE id IN (%s) AND status='deleted' LIMIT 1"
+                % ",".join("?" * len(source_ids)), tuple(source_ids)).fetchone()
+            if deleted:
+                self.db.execute("UPDATE items SET status='deleted' WHERE id=?", (sid,))
+                self.add_tombstone(summary, audience=audience, user_id=user_id)
+                self._changed(clear_profiles=True)
+            else:
+                self.db.executemany("UPDATE items SET status='merged', parent_id=? WHERE id=?",
+                                    [(sid, i) for i in source_ids])
             self.db.commit()
+        if deleted:
+            self._remove_mirror_line(path, "summary", sid)
+            return None
         return sid
 
     # ================= 关系（好感度） =================
+
     def relation(self, platform: str, uid: str) -> dict:
         with self.lock:
             r = self.db.execute("SELECT * FROM relations WHERE platform=? AND uid=?", (platform, uid)).fetchone()
@@ -1059,8 +1216,7 @@ class MemoryStore:
         return stats
 
     def _sync_file(self, full: str, path: str, kinds: tuple, now: float, stats: dict) -> None:
-        # 读文件、比对数据库、写回文件整段持有 md_lock：中途别的线程追加一行，
-        # 会被这里基于旧快照的写回覆盖掉，然后下一轮同步又把它判成"用户删了"
+        # 先 md_lock 再数据库锁，读改写期间不会吞掉别的线程追加的镜像行。
         with self.md_lock:
             try:
                 with open(full, encoding="utf-8") as f:
@@ -1068,7 +1224,9 @@ class MemoryStore:
             except OSError:
                 return
             seen: set[int] = set()
+            removed: dict[int, object] = {}
             changed_file = False
+            changed_memory = False
             with self.lock:
                 for li, line in enumerate(lines):
                     m = self._MD_LINE.match(line)
@@ -1083,6 +1241,12 @@ class MemoryStore:
                         if r is None:
                             continue
                         if r["content"] != content or r["kind"] != kind or r["status"] == "deleted":
+                            if r["content"] != content:
+                                self.add_tombstone(r["content"], audience=r["audience"], user_id=r["user_id"])
+                                for derived in self._forget_derived(r):
+                                    removed[derived["id"]] = derived
+                            if r["status"] == "deleted":
+                                self._drop_tombstone(content, audience=r["audience"], user_id=r["user_id"])
                             self.db.execute("UPDATE items SET content=?, kind=?, status='hot', last_access=? WHERE id=?",
                                             (content, kind, now, iid))
                             self.db.execute("DELETE FROM items_fts WHERE rowid=?", (iid,))
@@ -1090,27 +1254,46 @@ class MemoryStore:
                                             (iid, index_text(content + " " + (r["tags"] or ""))))
                             self.db.execute("DELETE FROM vecs WHERE id=?", (iid,))
                             stats["updated"] += 1
+                            changed_memory = True
                     else:
                         cur = self.db.execute(
-                            "INSERT INTO items(path,kind,role,speaker,content,importance,tau_h,created,last_access,tags)"
-                            " VALUES(?,?,?,?,?,?,?,?,?,?)",
-                            (path, kind, "", "", content, 0.85, float(self.tau.get(kind, 72)), now, now, "manual"))
+                            "INSERT INTO items(path,kind,role,speaker,content,importance,tau_h,created,last_access,tags,"
+                            "audience,source_path) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (path, kind, "", "", content, 0.85, float(self.tau.get(kind, 72)), now, now, "manual",
+                             self._default_audience(path), path))
                         new_id = cur.lastrowid; seen.add(new_id)
                         self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)", (new_id, index_text(content + " manual")))
                         lines[li] = f"{prefix}[{kind}] {content}  <!-- id={new_id} imp=0.85 {time.strftime('%Y-%m-%d', time.localtime(now))} manual -->"
-                        changed_file = True
+                        changed_file = changed_memory = True
                         stats["added"] += 1
-                q = ("SELECT id, content FROM items WHERE path=? AND kind IN (%s) "
+                q = ("SELECT * FROM items WHERE path=? AND kind IN (%s) "
                      "AND status NOT IN ('merged','deleted') AND created < ?" % ",".join("?" * len(kinds)))
-                gone = [(r["id"], r["content"]) for r in self.db.execute(q, (path, *kinds, now - 5))
-                        if r["id"] not in seen]
+                gone = [r for r in self.db.execute(q, (path, *kinds, now - 5)) if r["id"] not in seen]
+                for row in gone:
+                    self.add_tombstone(row["content"], audience=row["audience"], user_id=row["user_id"])
+                    for derived in self._forget_derived(row):
+                        removed[derived["id"]] = derived
+                    self.db.execute("UPDATE items SET status='deleted' WHERE id=?", (row["id"],))
                 if gone:
-                    for _iid, content in gone:
-                        self.add_tombstone(content)      # 用户删掉的，自动提炼不再复活
-                    self.db.executemany("UPDATE items SET status='deleted' WHERE id=?",
-                                        [(i,) for i, _ in gone])
                     stats["deleted"] += len(gone)
+                    changed_memory = True
+                if changed_memory:
+                    self._changed(clear_profiles=True)
                 self.db.commit()
+            if removed:
+                # 本文件用当前快照删除；其他文件可在持有 md_lock 时安全更新。
+                out = []
+                for line in lines:
+                    match = self._MD_LINE.match(line)
+                    if match and match.group(5) and int(match.group(5)) in removed:
+                        changed_file = True
+                        continue
+                    out.append(line)
+                lines = out
+                for row in removed.values():
+                    other = os.path.join(self.md_root, *row["path"].split("/"), self._md_name(row["kind"]))
+                    if os.path.normcase(other) != os.path.normcase(full):
+                        self._remove_mirror_line(row["path"], row["kind"], row["id"])
             if changed_file:
                 atomic_write(full, "\n".join(lines))
         if self.embedder is not None:

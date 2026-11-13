@@ -109,12 +109,11 @@ class ForgetRestoreTest(Base):
         self.assertIn(f"id={old}", md)
         self.assertNotIn("superseded_by=", md, "恢复时要把 md 注释里的 superseded_by= 去掉")
 
-    def test_forget_stranger_forbidden(self):
+    def test_admin_can_forget_stranger(self):
         st = self.store()
         iid = st.write("chat/qq/group/1", "fact", "群里路人的一句话", 0.6, trust="stranger")
-        with self.assertRaises(PermissionError):
-            st.forget(iid)
-        self.assertIn(iid, [x.id for x in st.search("群里路人", "chat/qq/group/1", k=5, touch=False)])
+        self.assertEqual(st.forget(iid)["id"], iid)
+        self.assertNotIn(iid, [x.id for x in st.search("群里路人", "chat/qq/group/1", k=5, touch=False)])
 
     def test_forget_missing_returns_none(self):
         st = self.store()
@@ -123,7 +122,7 @@ class ForgetRestoreTest(Base):
 
 
 class HttpAdminTest(Base):
-    def test_forget_403_flush_and_timeline(self):
+    def test_forget_flush_and_timeline(self):
         from soulcore.server import serve
         eng, cfg = self.engine()
         stranger = eng.store.write("chat/qq/group/1", "fact", "群里路人的一句话", 0.6, trust="stranger")
@@ -145,10 +144,9 @@ class HttpAdminTest(Base):
                 with urllib.request.urlopen(urllib.request.Request(base + path, headers=hdr)) as r:
                     return json.loads(r.read())
 
-            # 陌生人的条目不能删
-            with self.assertRaises(urllib.error.HTTPError) as cm:
-                post("/v1/memory/forget", {"id": stranger})
-            self.assertEqual(cm.exception.code, 403)
+            # 已认证的本地管理员也能清理陌生人来源的条目。
+            self.assertTrue(post("/v1/memory/forget", {"id": stranger})["ok"])
+            self.assertFalse(any(x["id"] == stranger for x in get("/v1/memory/timeline?limit=20")["recent"]))
 
             # 先产生一条未提炼的 turn，再调 flush
             ev = Event("local", "project", "demo", "owner", "主人",

@@ -1,7 +1,7 @@
 {
   "name": "dsh-soulcore",
-  "version": "0.9.0",
-  "description": "给 DeepSeek Harness 的 agent 一个独立人格：PID 平滑的概率情绪 + LSTM 门控式分层长期记忆（按项目/会话归档，压缩前自动提炼落盘），可选接入 QQ(OneBot v11) 与 B站。",
+  "version": "0.10.0",
+  "description": "给 DeepSeek Harness 的聊天加上持续人格、平滑情绪与分层长期记忆，支持对话内记住/忘记、QQ(OneBot v11)、B站与主动聊天；兼容项目记忆、Claude Code 和 MCP。",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -26,7 +26,7 @@
   },
   "files": [
     "lib",
-    "core/soulcore",
+    "core/soulcore/**/*.py",
     "core/run.py",
     "core/persona.example.md",
     "core/config.example.json",

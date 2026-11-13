@@ -153,7 +153,8 @@ class McpServer:
             except (TypeError, ValueError):
                 ago = "以前"
             stale = "（已过时）" if it.get("invalid_at") else ""
-            lines.append(f"#{it.get('id')} [{it.get('kind', 'fact')}·{ago}] {stale}{it.get('content', '')}")
+            note = f"（注意：{it['stale_note']}）" if it.get("stale_note") else ""
+            lines.append(f"#{it.get('id')} [{it.get('kind', 'fact')}·{ago}] {stale}{it.get('content', '')}{note}")
         return "\n".join(lines)
 
     def call_tool(self, name: str, args: dict) -> dict:

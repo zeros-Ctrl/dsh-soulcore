@@ -127,7 +127,7 @@ def _rule_a(new: str, old: str) -> bool:
     new_slots = _slots(new)
     if not new_slots:
         return False
-    for name, s1, v1, _p1 in _slots(old):
+    for name, s1, v1, p1 in _slots(old):
         for name2, s2, v2, p2 in new_slots:
             if name != name2 or not _value_changed(v1, v2):
                 continue
@@ -136,7 +136,8 @@ def _rule_a(new: str, old: str) -> bool:
             if name in _PERSONAL:
                 # 个人属性只看"我"：值前面最近的人不是"我"，就是在说别人
                 who = _subject_before(new, p2)
-                if who and who != "我":
+                old_who = _subject_before(old, p1)
+                if (who and who != "我") or (old_who and old_who != "我"):
                     continue
             if CHANGE.search(new) or name in _SINGLE_VALUE:
                 return True

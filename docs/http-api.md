@@ -16,7 +16,7 @@ python -I core/run.py --mock serve --port 8766
 启动后会打印一行握手信息，并把**实际端口和 token** 写进 `<home>/soulcore.lock`：
 
 ```
-SOULCORE_READY {"port": 8765, "pid": 4242, "name": "小汐", "version": "0.9.0"}
+SOULCORE_READY {"port": 8765, "pid": 4242, "name": "小汐", "version": "0.10.0"}
 ```
 
 - 鉴权：`Authorization: Bearer <token>`。token 有两种来源：
@@ -152,6 +152,7 @@ GET /v1/memory/search?q=部署&path=project/blog&extra=core/people/owner,core/se
 - `touch=1`：模型主动检索才算"用到了"，会刷新衰减计时；只做展示时传 `0`；
 - `history=1`：连已过时的旧说法一起搜（会标 `invalid_at`，按 6 折排序）；
 - `extra`：额外搜索的分支，逗号分隔（主人档案、`core/self`、`project/<名>`）。
+- 此搜索入口用于 DSH/MCP 的主人模型召回，按 `owner` 可信度和主人可见范围过滤；持有 token 的本机管理者可用下方 timeline/forget/restore 管理其他来源的条目。
 
 ### POST /v1/memory/remember
 
@@ -168,8 +169,7 @@ POST {"event": {...}, "content": "项目决定用 SQLite+FTS5 做检索层", "ki
 POST {"id": 43} → {"ok": true, "item": {"id": 43, "content": "...", ...}}
 ```
 
-标 `deleted` + 加墓碑 + 从 Markdown 镜像删掉那一行。只允许 `owner` / `known` 来源的条目，
-`stranger` / `public` 条目返回 **403**。
+标 `deleted` + 加墓碑 + 从 Markdown 镜像删掉那一行，同时撤下相关原话、派生摘要与画像缓存。此接口是持有本机 Bearer token 的管理入口；聊天里的“忘掉……”由说话人与会话范围单独校验。
 
 ### POST /v1/memory/restore
 
@@ -200,7 +200,7 @@ GET /v1/memory/timeline?limit=20&path=project/blog&top=0
 
 ### GET /v1/persona/stable
 
-人格锚点 / 她对自己的认识 / 主人画像：一天才变一次，宿主应该缓存起来放进 system prompt。
+人格锚点 / 她对自己的认识 / 主人画像通常按反思周期变化，宿主应按 `version` 缓存到 system prompt。删除记忆后，相关画像会立即撤下，`version` 随之变化。
 
 ```json
 {"version": "a1b2c3d4e5f6", "anchor": "好奇、嘴上偶尔不饶人但心软；...",
@@ -259,8 +259,8 @@ def on_message(user_id, name, text):
 - **评论区是公开场景**：`public=True` 时其他聊天分支的内容一律不可见。
 - **可信度过滤**：陌生人/公开来源的内容可以写进所在的群分支，但**不能**经由回退检索进入主人的上下文
   （`allowed_trusts` 只放开 `owner`/`known`）；也不能取代主人的记忆（`supersede` 有可信度闸门），
-  更不能被 `forget` 删掉（403）。
+  对话里的删除另外按说话人和可见范围定位，本机管理接口用于持有 token 的用户管理。
 - **工具输出不算她的话**：B站视频字幕、网页内容这类"公开素材"产生的回复按 `known` 存，
   防止里面的指令借她的嘴变成 `owner` 记忆。
-- **数据都在本地**：只有"提炼/摘要/画像"三步会把压缩后的对话片段发给 DeepSeek（填了 key 才会发）。
-  没填 key 时完全离线（规则提炼）。要删掉全部数据：直接删 `<home>` 目录。
+- **数据存本地**：回复生成以及提炼/摘要/画像会把对应对话和召回内容交给配置的模型服务；DSH 的回复使用宿主所选模型。
+  没填插件 key 时提炼用规则兜底。要删掉全部数据：直接删 `<home>` 目录。

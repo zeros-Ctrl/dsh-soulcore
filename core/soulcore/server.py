@@ -81,11 +81,12 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                                           k=int(qs.get("k", ["10"])[0]),
                                           touch=qs.get("touch", ["0"])[0].lower() in ("1", "true", "yes"),
                                           include_history=qs.get("history", ["0"])[0].lower() in ("1", "true", "yes"),
-                                          extra_paths=extra)
+                                          extra_paths=extra, allowed_trusts=("owner",),
+                                          allowed_audiences=("public", "owner"))
                 return self._send(200, [{"id": i.id, "path": i.path, "kind": i.kind, "content": i.content,
                                          "trust": i.trust, "pinned": bool(i.pinned),
                                          "created": i.created, "valid_from": i.valid_from,
-                                         "invalid_at": i.invalid_at,
+                                         "invalid_at": i.invalid_at, "stale_note": i.stale_note,
                                          "score": round(i.score, 4), "weight": round(i.weight_now, 4)}
                                         for i in its])
             if u.path == "/v1/memory/timeline":

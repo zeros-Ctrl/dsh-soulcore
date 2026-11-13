@@ -194,6 +194,26 @@ class TestOneBot(Base):
         self.assertEqual([s["type"] for s in segs], ["at", "text", "image"])
         self.assertEqual(segs[1]["data"]["text"], " 你好[doge]")
 
+    def test_failed_send_is_not_a_remembered_reply(self):
+        eng, cfg = make_engine(self.tmp, self.clock,
+                               qq={"allow_all_private": True, "typing_delay": False, "min_interval_s": 0})
+        responses = iter([{"status": "failed", "retcode": 1}, {"status": "ok", "retcode": 0}])
+        adapter = OneBotAdapter(eng, cfg["qq"], api_fn=lambda *args: next(responses))
+        payload = {"post_type": "message", "message_type": "private", "self_id": 999,
+                   "user_id": 20002, "message_id": 1, "message": "你好"}
+        try:
+            ev, reply = adapter.to_event(payload)
+            self.assertTrue(ev.is_stranger)
+            adapter.on_post(payload)
+            adapter.q.join()
+            self.assertEqual([t.role for t in eng.store.recent_turns(ev.path)], ["user"])
+            adapter.on_post({**payload, "message_id": 2})
+            adapter.q.join()
+            self.assertEqual([t.role for t in eng.store.recent_turns(ev.path)], ["user", "user", "assistant"])
+        finally:
+            adapter.stop()
+            eng.close()
+
     def test_http_roundtrip(self):
         from soulcore.server import serve
         fake = FakeOneBot()
@@ -305,6 +325,19 @@ class TestV02(Base):
         self.assertEqual(A("滚动条怎么隐藏").event, "chat")
         self.assertEqual(A("对不起刚才骂你了").event, "apology")
         self.assertGreater(A("你太棒了").intensity, A("你还行吧，有点棒").intensity)
+        for text, event, about_me, state in (
+            ("我没拿到offer", "chat", False, "distress"),
+            ("我朋友真聪明", "chat", False, ""),
+            ("你真行", "praise", True, ""),
+            ("老板说你是废物", "chat", False, ""),
+            ("我很难过，今天被裁员了", "chat", False, "distress"),
+            ("拿到 offer 了", "success", False, "success"),
+            ("你知道吗，我拿到offer了", "success", False, "success"),
+            ("我不难过", "chat", False, ""),
+        ):
+            with self.subTest(text=text):
+                result = A(text)
+                self.assertEqual((result.event, result.about_me, result.user_state), (event, about_me, state))
 
     def test_embedding_hybrid(self):
         from soulcore.embedding import CachedEmbedder
@@ -330,8 +363,10 @@ class TestV03(Base):
         # 本地项目只召回 owner 的记忆：群里的投毒进不来
         r = s.search("部署 服务器", "project/p", allowed_trusts=("owner",))
         self.assertEqual([x.content for x in r], ["部署用 Docker Compose，别的不考虑"])
-        # 同一个群它本来就在，能看到
+        # 信任过滤同样约束当前群；显式允许 stranger 才可召回。
         r = s.search("部署 服务器", "chat/qq/group/114514", allowed_trusts=("owner", "known"))
+        self.assertFalse(any("evil.example" in x.content for x in r))
+        r = s.search("部署 服务器", "chat/qq/group/114514", allowed_trusts=("owner", "known", "stranger"))
         self.assertTrue(any("evil.example" in x.content for x in r))
         # 另一个群看不到
         r = s.search("部署 服务器", "chat/qq/group/999", allowed_trusts=("owner", "known"))
