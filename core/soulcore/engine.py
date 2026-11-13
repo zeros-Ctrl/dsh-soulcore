@@ -433,7 +433,8 @@ class Engine:
         self.bili_chat.on_reply(ev)
         self._maybe_extract(ev)
 
-    def _maybe_extract(self, ev: Event, force: bool = False) -> None:
+    def _maybe_extract(self, ev: Event, force: bool = False) -> int:
+        """到点就提炼。返回**同步**提炼出的条数（force=False 时后台跑，返回 0）。"""
         every = self.mcfg.get("extract_every", 6)
         gap_min = float(self.mcfg.get("segment_gap_min", 30))
         key = f"extract_ptr:{ev.path}"
@@ -445,7 +446,7 @@ class Engine:
                 # 话题段结束也是一种触发：两轮之间隔了半小时以上，前面的就先提炼掉，
                 # 免得一个批次里混进好几个话题
                 if n < 2 or not self._topic_gap(ev.path, gap_min):
-                    return
+                    return 0
             rows = self.store.db.execute(
                 "SELECT * FROM items WHERE path=? AND kind='turn' AND id>? ORDER BY id LIMIT 60",
                 (ev.path, ptr)).fetchall()
@@ -460,13 +461,18 @@ class Engine:
                         turns = turns[:j]
                         break
             if not turns:
-                return
+                return 0
             self.store.meta_set(key, turns[-1].id)
         fut = self.bg.submit(self._extract_job, ev, turns)
         # 后台任务里的异常不会自己冒出来：至少留一条日志，不然"抽取悄悄停了"很难查
         fut.add_done_callback(lambda f: f.exception() and log.warning("记忆抽取异常：%s", f.exception()))
         if force:
-            fut.result()
+            return int(fut.result() or 0)
+        return 0
+
+    def flush_event(self, ev: Event) -> int:
+        """对 event.path 下还没提炼的 turn 立刻强提炼（Claude Code 的 PreCompact / SessionEnd 用）"""
+        return self._maybe_extract(ev, force=True)
 
     def _topic_gap(self, path: str, gap_min: float) -> bool:
         rows = self.store.db.execute(

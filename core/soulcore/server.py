@@ -82,6 +82,12 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                                          "trust": i.trust, "pinned": bool(i.pinned),
                                          "score": round(i.score, 4), "weight": round(i.weight_now, 4)}
                                         for i in its])
+            if u.path == "/v1/memory/timeline":
+                try:
+                    limit = int(qs.get("limit", ["20"])[0])
+                except ValueError:
+                    limit = 20
+                return self._send(200, engine.store.timeline(limit, qs.get("path", [""])[0] or None))
             return self._send(404, {"error": "not found"})
 
         def do_POST(self):
@@ -128,6 +134,17 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                     return self._send(200, {"amp": amp, **engine.state()})
                 if u.path == "/v1/memory/sync":
                     return self._send(200, engine.store.sync_markdown(force=bool(b.get("force"))))
+                if u.path in ("/v1/memory/forget", "/v1/memory/restore"):
+                    fn = engine.store.forget if u.path.endswith("forget") else engine.store.restore
+                    try:
+                        item = fn(b.get("id"))
+                    except PermissionError as ex:
+                        return self._send(403, {"error": str(ex)})
+                    except (TypeError, ValueError) as ex:
+                        return self._send(400, {"error": f"bad id: {ex}"})
+                    if item is None:
+                        return self._send(404, {"error": "没有这条记忆（原始对话不能删/恢复）"})
+                    return self._send(200, {"ok": True, "item": item})
                 ev = Event.from_dict(b.get("event", {}))
                 if u.path == "/v1/chat":
                     reply = engine.handle(ev, reply=b.get("reply", True))
@@ -147,6 +164,10 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                 if u.path == "/v1/hooks/after":
                     engine.after(ev, b.get("reply", ""))
                     return self._send(200, {"ok": True})
+                if u.path == "/v1/hooks/flush":
+                    # Claude Code 的 PreCompact / SessionEnd 用：轮次已经实时写进后端，
+                    # 这里只需要把还没提炼的 turn 立刻提炼掉，不再解析 transcript。
+                    return self._send(200, {"ok": True, "extracted": engine.flush_event(ev)})
                 if u.path == "/v1/hooks/pre_compact":
                     n = engine.pre_compact(ev, b.get("messages", []))
                     return self._send(200, {"ok": True, "extracted": n})

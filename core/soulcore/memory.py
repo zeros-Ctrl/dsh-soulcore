@@ -701,6 +701,164 @@ class MemoryStore:
                 "SELECT DISTINCT substr(path, 9) AS p FROM items WHERE path LIKE 'project/%'").fetchall()
         return sorted({r["p"].split("/")[0] for r in rows if r["p"]})
 
+    # ================= 记忆管理：时间线 / 遗忘 / 恢复（v0.9） =================
+    @staticmethod
+    def brief(r) -> dict:
+        """返回给 MCP / 设置页 / Claude Code 命令的统一字段（不含 importance 这类内部值）"""
+        return {"id": r["id"], "path": r["path"], "kind": r["kind"], "content": r["content"],
+                "trust": r["trust"] or "owner", "pinned": bool(r["pinned"]),
+                "created": r["created"], "valid_from": r["valid_from"],
+                "invalid_at": r["invalid_at"], "superseded_by": r["superseded_by"],
+                "stale_note": r["stale_note"]}
+
+    def timeline(self, limit: int = 20, path: str | None = None) -> dict:
+        """最近的记忆：新增的（recent）和刚被取代的（superseded，带旧值/新值）。
+
+        只列提炼过的条目（turn 是原始对话流水，不是"记忆"）；被合并进摘要的不列。
+        """
+        try:
+            limit = max(1, min(int(limit or 20), 200))
+        except (TypeError, ValueError):
+            limit = 20
+        cond = "kind!='turn' AND status NOT IN ('merged','deleted')"
+        args: list = []
+        if path:
+            cond += " AND (path=? OR path LIKE ?)"
+            args = [path, path + "/%"]
+        with self.lock:
+            recent = [self.brief(r) for r in self.db.execute(
+                f"SELECT * FROM items WHERE {cond} AND invalid_at IS NULL "
+                "ORDER BY created DESC, id DESC LIMIT ?", (*args, limit)).fetchall()]
+            rows = self.db.execute(
+                f"SELECT * FROM items WHERE {cond} AND invalid_at IS NOT NULL AND superseded_by IS NOT NULL "
+                "ORDER BY invalid_at DESC, id DESC LIMIT ?", (*args, limit)).fetchall()
+            superseded = []
+            for r in rows:
+                n = self.db.execute("SELECT id, content FROM items WHERE id=?",
+                                    (r["superseded_by"],)).fetchone()
+                superseded.append({"old": self.brief(r), "at": r["invalid_at"],
+                                   "new": ({"id": n["id"], "content": n["content"]} if n else None)})
+        return {"recent": recent, "superseded": superseded}
+
+    def forget(self, item_id) -> dict | None:
+        """忘掉一条记忆：标 deleted + 墓碑 + 从 Markdown 删掉对应的行。
+
+        - 只允许 owner / known 来源的条目：群里的陌生人不能借接口删主人的记忆；
+        - 墓碑保证"自动提炼"以后不会把它复活（用户主动删掉的内容不再记）。
+        """
+        try:
+            iid = int(item_id)
+        except (TypeError, ValueError):
+            return None
+        with self.lock:
+            r = self.db.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone()
+            if r is None or r["kind"] == "turn":
+                return None
+            if TRUST_RANK.get(r["trust"] or "owner", 3) < TRUST_RANK["known"]:
+                raise PermissionError("这条记忆的来源不可信（stranger/public），不能删除")
+            self.db.execute("UPDATE items SET status='deleted' WHERE id=?", (iid,))
+            self.db.commit()
+            brief = self.brief(r)
+            path, kind, content = r["path"], r["kind"], r["content"]
+        self.add_tombstone(content)
+        self._remove_mirror_line(path, kind, iid)
+        return brief
+
+    def restore(self, item_id) -> dict | None:
+        """把忘掉 / 被取代的条目恢复成有效记忆。
+
+        - 被取代的：清空 invalid_at / superseded_by，去掉 md 注释里的 superseded_by=；
+          新条目仍然有效（两条并存，由用户自己决定留哪条）；
+        - 被删除的：status 回 hot、移除对应墓碑、把 md 行补回来。
+        """
+        try:
+            iid = int(item_id)
+        except (TypeError, ValueError):
+            return None
+        with self.lock:
+            r = self.db.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone()
+            if r is None or r["kind"] == "turn":
+                return None
+            path, kind, content = r["path"], r["kind"], r["content"]
+            was_superseded = r["invalid_at"] is not None
+            if was_superseded:
+                self.db.execute("UPDATE items SET invalid_at=NULL, superseded_by=NULL WHERE id=?", (iid,))
+            self.db.execute("UPDATE items SET status='hot' WHERE id=?", (iid,))
+            self.db.commit()
+            self._drop_tombstone(content)
+            row = self.db.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone()
+            brief = self.brief(row)
+        if was_superseded:
+            self._strip_mirror_note(path, kind, iid, "superseded_by")
+        if not self._mirror_has_line(path, kind, iid):
+            self._mirror(path, kind, content, iid, row["importance"], row["speaker"], row["role"],
+                         row["created"] or self.clock())
+        return brief
+
+    def _drop_tombstone(self, content: str) -> int:
+        fp = self._fp(content)
+        if not fp:
+            return 0
+        with self.lock:
+            cur = self.db.execute("DELETE FROM tombstones WHERE fp=?", (fp,))
+            self.db.commit()
+            return cur.rowcount
+
+    def _mirror_has_line(self, path: str, kind: str, iid: int) -> bool:
+        if kind == "turn":
+            return True
+        fn = os.path.join(self.md_root, *path.split("/"), self._md_name(kind))
+        with self.md_lock:
+            try:
+                with open(fn, encoding="utf-8") as f:
+                    return bool(re.search(r"<!--\s*id=%d(?!\d)" % int(iid), f.read()))
+            except OSError:
+                return False
+
+    def _remove_mirror_line(self, path: str, kind: str, iid: int) -> bool:
+        """从 Markdown 镜像里删掉一条（forget 用）。正文按 id 注释定位，不动其他行。"""
+        if kind == "turn":
+            return False
+        fn = os.path.join(self.md_root, *path.split("/"), self._md_name(kind))
+        with self.md_lock:
+            try:
+                with open(fn, encoding="utf-8") as f:
+                    lines = f.read().split("\n")
+            except OSError:
+                return False
+            pat = re.compile(r"<!--\s*id=%d(?!\d)" % int(iid))
+            out = [ln for ln in lines if not pat.search(ln)]
+            if len(out) == len(lines):
+                return False
+            atomic_write(fn, "\n".join(out))
+            return True
+
+    def _strip_mirror_note(self, path: str, kind: str, iid: int, key: str) -> bool:
+        """去掉 md 注释里的某个标记（restore 时清掉 superseded_by=…）"""
+        if kind == "turn":
+            return False
+        fn = os.path.join(self.md_root, *path.split("/"), self._md_name(kind))
+        with self.md_lock:
+            try:
+                with open(fn, encoding="utf-8") as f:
+                    lines = f.read().split("\n")
+            except OSError:
+                return False
+            pat = re.compile(r"\s*%s=\d+" % re.escape(key))
+            out, changed = [], False
+            for line in lines:
+                if re.search(r"<!--\s*id=%d(?!\d)" % int(iid), line):
+                    new = pat.sub("", line)
+                    if new != line:
+                        changed = True
+                        line = new
+                out.append(line)
+            if not changed:
+                return False
+            atomic_write(fn, "\n".join(out))
+            return True
+
+
     def move_path(self, old: str, new: str) -> int:
         """把某个分支下的条目迁到新路径（人物档案合并用）。返回迁移条数。"""
         if not old or old == new:
