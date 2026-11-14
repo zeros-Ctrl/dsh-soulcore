@@ -118,14 +118,21 @@ test('压缩前抢救：compaction 请求里的原文被提炼成长期记忆', 
   const [{ fn, opts }] = ctx.listeners['llm/stream']
   assert.equal(opts.global, true)
   let passed = false
-  await fn({ purpose: 'compaction', sessionId: 's1', messages: [
+  const chunks = [{ type: 'text', text: '压缩摘要' }]
+  const received = []
+  const stream = fn({ purpose: 'compaction', sessionId: 's1', messages: [
     { role: 'system', content: [{ type: 'text', text: 'sys' }] },
     userMsg('我们决定日志改用 JSONL，不用 CSV 了，因为要追加写'),
     { role: 'assistant', content: [{ type: 'text', text: '好的' }], source: { kind: 'model' } },
     { role: 'user', content: [{ type: 'text', text: 'Summarize the conversation' }], source: { kind: 'compaction' } },
-  ] }, () => { passed = true })
+  ] }, () => {
+    passed = true
+    assert.equal(plugin.stats.compactions, 1, '先完成记忆提炼，再调用模型流')
+    return (async function* () { yield* chunks })()
+  })
+  for await (const chunk of stream) received.push(chunk)
+  assert.deepEqual(received, chunks)
   assert.ok(passed, '必须继续调用 next()')
-  await fn({ purpose: 'main', messages: [] }, () => {})
   assert.equal(plugin.stats.compactions, 1)
   const r = await ctx.registered.memory_search.execute({ query: '日志 JSONL' }, { agent: agent() })
   assert.match(r.text, /JSONL/)

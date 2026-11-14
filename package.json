@@ -1,6 +1,6 @@
 {
   "name": "dsh-soulcore",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "给 DeepSeek Harness 的聊天加上持续人格、平滑情绪与分层长期记忆，支持对话内记住/忘记、QQ(OneBot v11)、B站与主动聊天；兼容项目记忆、Claude Code 和 MCP。",
   "keywords": [
     "dsh",

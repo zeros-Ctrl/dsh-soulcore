@@ -119,3 +119,67 @@ test('channelOf：在 git 仓库子目录里用仓库根目录名', () => {
   fs.mkdirSync(plain, { recursive: true })
   assert.equal(glue.channelOf({ session: { id: 'x', header: { cwd: plain } } }), 'scratch')
 })
+
+test('llm/stream：普通模型调用直接迭代并逐块转发', async () => {
+  const [{ fn }] = ctx.listeners['llm/stream']
+  const chunks = [{ type: 'text', text: '回复' }, { type: 'finish', reason: 'stop' }]
+  let nextCalls = 0
+  const stream = fn({ purpose: 'main', messages: [] }, () => {
+    nextCalls += 1
+    return (async function* () { yield* chunks })()
+  })
+  const received = []
+  for await (const chunk of stream) received.push(chunk)
+  assert.deepEqual(received, chunks)
+  assert.equal(received[0], chunks[0], '保持原始流块')
+  assert.equal(nextCalls, 1)
+})
+
+test('llm/stream：模型流错误传给调用方', async () => {
+  const [{ fn }] = ctx.listeners['llm/stream']
+  const expected = new Error('模型流读取失败')
+  const stream = fn({ purpose: 'main', messages: [] }, () => (async function* () { throw expected })())
+  await assert.rejects(async () => {
+    for await (const chunk of stream) assert.fail('失败的流不应输出内容')
+  }, (error) => error === expected)
+})
+
+test('llm/stream：提前停止读取时关闭模型流', async () => {
+  const [{ fn }] = ctx.listeners['llm/stream']
+  let closed = false
+  const stream = fn({ purpose: 'main', messages: [] }, () => (async function* () {
+    try { yield { type: 'text', text: '第一块' }; yield { type: 'text', text: '第二块' } }
+    finally { closed = true }
+  })())
+  for await (const chunk of stream) {
+    assert.equal(chunk.text, '第一块')
+    break
+  }
+  assert.equal(closed, true)
+})
+
+test('llm/stream：压缩前提炼失败仍转发模型流', async () => {
+  const [{ fn }] = ctx.listeners['llm/stream']
+  const originalRequest = plugin.core.request
+  const failures = plugin.stats.failures
+  const chunks = [{ type: 'text', text: '压缩摘要' }]
+  let preCompactCalls = 0
+  plugin.core.request = async function (method, requestPath, ...args) {
+    if (requestPath === '/v1/hooks/pre_compact') {
+      preCompactCalls += 1
+      throw new Error('提炼后端暂时不可用')
+    }
+    return originalRequest.call(this, method, requestPath, ...args)
+  }
+  try {
+    const stream = fn({ purpose: 'compaction', sessionId: 'stream-failure', messages: [userMsg('保留这条记忆')] },
+      () => (async function* () { yield* chunks })())
+    const received = []
+    for await (const chunk of stream) received.push(chunk)
+    assert.deepEqual(received, chunks)
+    assert.equal(preCompactCalls, 1)
+    assert.equal(plugin.stats.failures, failures + 1)
+  } finally {
+    plugin.core.request = originalRequest
+  }
+})
