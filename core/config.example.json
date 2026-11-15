@@ -27,6 +27,19 @@
 
   "appraisal": { "mode": "heuristic" },
 
+  "usage": { "enabled": true, "prices": {} },
+  "behavior": {
+    "enabled": true,
+    "max_messages": 3,
+    "quiet_enabled": false,
+    "quiet_threshold": 0.20,
+    "quiet_arousal_max": 0.45,
+    "quiet_max_probability": 0.35,
+    "quiet_duration_min": 15,
+    "quiet_cooldown_min": 30,
+    "quiet_max_consecutive": 1
+  },
+
   "owner": { "qq": "你的QQ号", "name": "主人" },
 
   "memory": {
@@ -47,7 +60,11 @@
     "extract_assistant_chars": 300,
     "extract_user_chars": 800,
     "segment_gap_min": 30,
-    "reflect_every_h": 20
+    "reflect_every_h": 20,
+    "project_identity": "registry",
+    "recall_token_budget": 800,
+    "context_token_budget": 1000,
+    "extract_token_budget": 8000
   },
 
   "balance": { "check_every_min": 60, "low_threshold": 5.0 },

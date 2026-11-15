@@ -20,6 +20,9 @@ class Event:
     reply_target: dict = field(default_factory=dict)  # 回发时需要的平台参数
     is_stranger: bool = False     # B站评论区路人等
     raw: dict = field(default_factory=dict)
+    cwd: str = ""                # 项目身份由后端注册表解析，不依赖 basename 唯一性
+    project_id: str = ""
+    session_id: str = ""
 
     # ---------- 记忆路由（确定性，按元数据分流，不靠 LLM 猜） ----------
     @property

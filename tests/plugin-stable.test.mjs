@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import vm from 'node:vm'
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'soulcore-stable-'))
 process.env.DSH_HOME = path.join(TMP, 'dsh')
@@ -12,6 +13,44 @@ process.env.SOULCORE_HOME = path.join(TMP, 'soul')
 
 const { apply } = await import('../lib/index.js')
 const glue = await import('../lib/glue.js')
+
+for (const present of [false, true]) test(`设置页渲染：${present ? '显示用量计数' : '兼容缺少用量'}且 QQ 卡片作用域有效`, () => {
+  const cfg = { persona: { name: '小汐' }, qq: { enabled: false, transport: 'ws' } }
+  const state = { core: { ready: true }, state: { mood: 0.62, target: 0.62, label: '平静', memory: {},
+    usage: present ? { enabled: true, totals: { calls: 3, input_tokens: 1234, output_tokens: 56,
+      missing_usage_calls: 2 }, cost_complete: false } : undefined } }
+  let root = true, index = 0, client
+  const React = { Fragment: Symbol('fragment'),
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    useState: (initial) => {
+      const slot = root ? index++ : -1
+      return [slot === 0 ? state : slot === 1 ? cfg : initial, () => {}]
+    },
+    useCallback: (fn) => fn, useEffect: () => {} }
+  vm.runInNewContext(fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8'), {
+    window: { __ModuleLoader__: { load: (definition) => {
+      client = definition.factory((name) => { assert.equal(name, 'react'); return React })
+    } } },
+  })
+  const tree = client.SoulcoreSection()
+  const text = JSON.stringify(tree)
+  if (present) {
+    assert.match(text, /1,234/)
+    assert.match(text, /56/)
+    assert.match(text, /2 次缺 usage/)
+  } else assert.doesNotMatch(text, /实际用量/)
+  const nodes = []
+  function collect(node) {
+    if (!node || typeof node !== 'object') return
+    nodes.push(node)
+    for (const child of node.children || []) collect(child)
+  }
+  collect(tree)
+  const qq = nodes.find((node) => typeof node.type === 'function' && node.type.name === 'QQCard')
+  assert.ok(qq)
+  root = false
+  assert.doesNotThrow(() => qq.type(qq.props))
+})
 
 const STABLE = {
   version: 'abc123def456',
@@ -182,4 +221,181 @@ test('llm/stream：压缩前提炼失败仍转发模型流', async () => {
   } finally {
     plugin.core.request = originalRequest
   }
+})
+
+async function associateSession(id, messages = [userMsg('当前任务')]) {
+  const [{ fn }] = ctx.listeners['agent/pre-step']
+  await fn({ agent: agent(id), step: 1, signal: new AbortController().signal },
+    async () => ({ kind: 'enter', messages }))
+}
+
+const usageCalls = () => calls.filter((call) => call.path === '/v1/usage')
+
+test('宿主用量：累计块只记一次且不传消息或思考文本', async () => {
+  await associateSession('usage-complete')
+  const [{ fn }] = ctx.listeners['llm/stream']
+  const before = usageCalls().length
+  const chunks = [
+    { type: 'text', text: 'private response', usage: { prompt_tokens: 100, prompt_cache_hit_tokens: 30, content: 'private prompt' } },
+    { type: 'finish', model: 'actual-model', provider: 'actual-provider', usage: {
+      prompt_tokens: 100, prompt_cache_hit_tokens: 30, completion_tokens: 40,
+      completion_tokens_details: { reasoning_tokens: 20, reasoning_content: 'private reasoning' },
+    } },
+  ]
+  const received = []
+  for await (const chunk of fn({ sessionId: 'usage-complete', model: 'requested-model', provider: 'requested-provider', messages: [userMsg('private prompt')] },
+    () => (async function* () { yield* chunks })())) received.push(chunk)
+  assert.deepEqual(received, chunks)
+  assert.equal(received[0], chunks[0])
+  const added = usageCalls().slice(before)
+  assert.equal(added.length, 1)
+  assert.equal(added[0].body.provider, 'actual-provider')
+  assert.equal(added[0].body.model, 'actual-model')
+  assert.equal(added[0].body.purpose, 'host_online')
+  assert.equal(added[0].body.success, true)
+  assert.deepEqual(added[0].body.usage, { prompt_tokens: 100, prompt_cache_hit_tokens: 30,
+    completion_tokens: 40, completion_tokens_details: { reasoning_tokens: 20 } })
+  assert.doesNotMatch(JSON.stringify(added[0].body), /private prompt|private response|private reasoning|messages/)
+})
+
+test('宿主用量：显式 usage.data 可读取，缺 usage 明确未知', async () => {
+  await associateSession('usage-data')
+  const [{ fn }] = ctx.listeners['llm/stream']
+  const chunk = { type: 'usage', data: { input_tokens: 8, output_tokens: 3 } }
+  for await (const received of fn({ sessionId: 'usage-data' }, () => (async function* () { yield chunk })())) {
+    assert.equal(received, chunk)
+  }
+  assert.deepEqual(usageCalls().at(-1).body.usage, { input_tokens: 8, output_tokens: 3 })
+  for await (const received of fn({ sessionId: 'usage-data' }, () => (async function* () { yield { type: 'text', text: '很多字也不估算 token' } })())) assert.ok(received)
+  const row = usageCalls().at(-1).body
+  assert.equal(row.usage, null)
+  assert.equal(row.model, 'unknown')
+  assert.equal(row.provider, 'dsh')
+  assert.equal(row.success, true)
+})
+
+test('宿主用量：失败流保留原错误并记录已报告的消耗', async () => {
+  await associateSession('usage-error')
+  const [{ fn }] = ctx.listeners['llm/stream']
+  const expected = new Error('private error detail')
+  const stream = fn({ sessionId: 'usage-error' }, () => (async function* () {
+    yield { type: 'usage', data: { prompt_tokens: 9 } }
+    throw expected
+  })())
+  await assert.rejects(async () => { for await (const chunk of stream) assert.ok(chunk) }, (error) => error === expected)
+  const row = usageCalls().at(-1).body
+  assert.equal(row.success, false)
+  assert.equal(row.error_type, 'Error')
+  assert.deepEqual(row.usage, { prompt_tokens: 9 })
+  assert.doesNotMatch(JSON.stringify(row), /private error/)
+})
+
+test('宿主用量：提前停止关闭原流，标记未完整读取', async () => {
+  await associateSession('usage-close')
+  const [{ fn }] = ctx.listeners['llm/stream']
+  let closed = false
+  for await (const chunk of fn({ sessionId: 'usage-close' }, () => (async function* () {
+    try { yield { type: 'text', text: 'first' }; yield { type: 'text', text: 'second' } }
+    finally { closed = true }
+  })())) { assert.equal(chunk.text, 'first'); break }
+  assert.equal(closed, true)
+  assert.equal(usageCalls().at(-1).body.success, false)
+  assert.equal(usageCalls().at(-1).body.error_type, 'StreamClosed')
+})
+
+test('宿主用量：next 值与 throw 仍委托给模型迭代器', async () => {
+  await associateSession('usage-delegation')
+  const [{ fn }] = ctx.listeners['llm/stream']
+  let nextValue
+  const expected = new Error('injected')
+  const stream = fn({ sessionId: 'usage-delegation' }, () => (async function* () {
+    nextValue = yield { type: 'text', text: 'first' }
+    try { yield { type: 'text', text: 'second' } }
+    catch (error) { assert.equal(error, expected); yield { type: 'text', text: 'recovered' } }
+  })())
+  assert.equal((await stream.next()).value.text, 'first')
+  assert.equal((await stream.next('continue')).value.text, 'second')
+  assert.equal(nextValue, 'continue')
+  assert.equal((await stream.throw(expected)).value.text, 'recovered')
+  assert.equal((await stream.next()).done, true)
+  assert.equal(usageCalls().at(-1).body.success, true)
+})
+
+test('宿主用量：账本失败不吞掉模型错误或流块', async () => {
+  await associateSession('usage-backend-error')
+  const [{ fn }] = ctx.listeners['llm/stream']
+  const original = plugin.core.request
+  const failures = plugin.stats.failures
+  plugin.core.request = async function(method, p, ...args) {
+    if (p === '/v1/usage') throw new Error('ledger offline')
+    return original.call(this, method, p, ...args)
+  }
+  try {
+    const chunk = { type: 'text', text: 'still delivered' }
+    for await (const received of fn({ sessionId: 'usage-backend-error' }, () => (async function* () { yield chunk })())) assert.equal(received, chunk)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(plugin.stats.failures, failures + 1)
+  } finally { plugin.core.request = original }
+})
+
+test('宿主用量：未关联会话或关闭统计时不入账', async () => {
+  const [{ fn }] = ctx.listeners['llm/stream']
+  const before = usageCalls().length
+  for await (const chunk of fn({ sessionId: 'unassociated-usage' }, () => (async function* () { yield { usage: { prompt_tokens: 99 } } })())) assert.ok(chunk)
+  await associateSession('usage-disabled')
+  const cfg = plugin.getConfig()
+  const enabled = cfg.usage.enabled
+  cfg.usage.enabled = false
+  try {
+    for await (const chunk of fn({ sessionId: 'usage-disabled' }, () => (async function* () { yield { usage: { prompt_tokens: 99 } } })())) assert.ok(chunk)
+  } finally { cfg.usage.enabled = enabled }
+  assert.equal(usageCalls().length, before)
+})
+
+test('宿主用量：压缩调用单独归类', async () => {
+  await associateSession('usage-compaction')
+  const [{ fn }] = ctx.listeners['llm/stream']
+  const before = usageCalls().length
+  for await (const chunk of fn({ sessionId: 'usage-compaction', purpose: 'compaction', messages: [] },
+    () => (async function* () { yield { usage: { prompt_tokens: 10, completion_tokens: 2 } } })())) assert.ok(chunk)
+  assert.equal(usageCalls().length, before + 1)
+  assert.equal(usageCalls().at(-1).body.purpose, 'host_compaction')
+})
+
+test('来源与正文：只记录最新人类消息，长回复完整保存', async () => {
+  const earlier = { ...userMsg('旧轮次内容'), id: 'human-old' }
+  const latestText = '新轮次内容'.repeat(1200)
+  const latest = { ...userMsg(latestText), id: 'human-latest' }
+  await associateSession('source-identity', [earlier, latest])
+  const context = calls.filter((call) => call.path === '/v1/hooks/context').at(-1)
+  assert.equal(context.body.event.text, latestText)
+  assert.equal(context.body.event.event_id, 'human-latest')
+  const [{ fn }] = ctx.listeners['session/event']
+  const reply = '完整回复'.repeat(1300)
+  fn({ id: 'source-identity' }, { type: 'assistant/message', data: { message: { role: 'assistant', content: reply } } })
+  fn({ id: 'source-identity' }, { type: 'turn/end' })
+  assert.equal(calls.filter((call) => call.path === '/v1/hooks/after').at(-1).body.reply, reply)
+})
+
+test('项目检索：先解析稳定 ID 再传给搜索端点', async () => {
+  const registered = {}
+  const localCtx = fakeCtx()
+  localCtx.tools.register = (definition) => { registered[definition.name] = definition; return () => {} }
+  const localCore = fakeCore()
+  const original = localCore.core.request
+  localCore.core.request = async function(method, p, body, ...args) {
+    if (p === '/v1/projects/resolve') {
+      localCore.calls.push({ method, path: p, body })
+      return { project_id: 'project-stable-id', path: 'project/uuid-path' }
+    }
+    return original.call(this, method, p, body, ...args)
+  }
+  apply(localCtx, {}, { core: localCore.core, log: () => {} })
+  await localCore.core.start()
+  await registered.memory_search.execute({ query: '查询' }, { agent: agent('identity-search') })
+  const relevant = localCore.calls.filter((call) => call.path === '/v1/projects/resolve' || call.path.startsWith('/v1/memory/search?'))
+  assert.equal(relevant[0].path, '/v1/projects/resolve')
+  const query = new URL(relevant[1].path, 'http://localhost').searchParams
+  assert.equal(query.get('path'), 'project/uuid-path')
+  assert.equal(query.get('project_id'), 'project-stable-id')
 })

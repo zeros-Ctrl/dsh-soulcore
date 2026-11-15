@@ -12,8 +12,8 @@ memory.py —— 分层记忆库（借鉴 LSTM 门控思想，但不训练网络
 路径即目录树：chat/qq/group/<群号>、chat/bilibili/dm/<uid>、project/<项目名>、core/people/...、core/self
 """
 from __future__ import annotations
-import logging, math, os, re, sqlite3, threading, time, json
-from dataclasses import dataclass
+import logging, math, os, re, sqlite3, threading, time, json, shlex
+from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
 from .textutil import index_text, fts_query, jaccard, token_weights, overlap, tokens
@@ -24,7 +24,57 @@ from .conflicts import find_superseded, core_text
 log = logging.getLogger("soulcore")
 
 INDEX_VERSION = 2   # v2：索引里加入概念 token（见 concepts.py）
-SCHEMA_VERSION = 6  # v6：聊天可见范围 audience 与原始来源 source_path
+SCHEMA_VERSION = 7  # v7：项目身份、来源关联与提炼覆盖范围
+
+
+def _verification_passed(command: str, output: str) -> bool:
+    """Recognize a single test execution and a positive successful summary.
+
+    Searching for test names, collecting tests, shell pipelines and prose alone
+    do not establish verification. Unrecognized runners remain ordinary evidence.
+    """
+    if not command or re.search(r"[\r\n;&|<>`$]", command):
+        return False
+    try:
+        parts = [part.strip('\"\'') for part in shlex.split(command, posix=False)]
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    executable = parts[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    args = parts[1:]
+    forbidden = {"--help", "-h", "--version", "--collect-only", "--co", "--fixtures",
+                 "--fixtures-per-test", "--markers", "--trace-config", "--list-tests", "--show-only"}
+    if any(arg.split("=", 1)[0].lower() in forbidden or arg == "-N" for arg in args):
+        return False
+    if re.fullmatch(r"(?:python(?:\d+(?:\.\d+)*)?|py)(?:\.exe)?", executable):
+        while args and (args[0] in ("-u", "-B") or executable.startswith("py") and re.fullmatch(r"-3(?:\.\d+)?", args[0])):
+            args = args[1:]
+        runner = len(args) >= 2 and args[:2] in (["-m", "pytest"], ["-m", "unittest"])
+        if args[:2] == ["-m", "pytest"] and "-V" in args:
+            runner = False
+    elif executable in ("pytest", "pytest.exe", "ctest", "ctest.exe", "jest", "jest.cmd", "jest.exe"):
+        runner = True
+        if executable.startswith("pytest") and "-V" in args:
+            runner = False
+    elif executable in ("node", "node.exe"):
+        runner = bool(args and args[0] == "--test" and not any(arg in ("--eval", "-e", "--print", "-p") for arg in args))
+    elif executable in ("npm", "npm.cmd", "pnpm", "pnpm.cmd", "yarn", "yarn.cmd"):
+        runner = bool(args and (args[0] == "test" or args[:2] == ["run", "test"]))
+    else:
+        runner = False
+    if not runner or re.search(r"\b[1-9]\d*\s+(?:failed|failures?|errors?)\b|\bFAILED\s*(?:\(|:)|#\s*fail\s+[1-9]", output, re.I):
+        return False
+    if re.search(r"\b[1-9]\d*\s+(?:tests?\s+)?passed\b|\bTests:\s*[1-9]\d*\s+passed\b", output, re.I):
+        return True
+    if re.search(r"\bRan\s+[1-9]\d*\s+tests?\b", output) and re.search(r"(?m)^OK(?:\s|$)", output):
+        return True
+    if re.search(r"100% tests passed,\s*0 tests failed out of\s*[1-9]\d*", output, re.I):
+        return True
+    tests = re.search(r"(?m)^(?:#|ℹ)\s*tests\s+([1-9]\d*)\s*$", output)
+    passed = re.search(r"(?m)^(?:#|ℹ)\s*pass\s+([1-9]\d*)\s*$", output)
+    failed = re.search(r"(?m)^(?:#|ℹ)\s*fail\s+0\s*$", output)
+    return bool(tests and passed and failed and int(passed[1]) <= int(tests[1]))
 
 # 同类组：同一个槽位只该有一个当前值，所以只在组内找"被取代"的旧条目
 _KIND_GROUPS = (("fact", "preference", "person", "self"), ("decision",), ("todo",))
@@ -71,6 +121,7 @@ def atomic_write(path: str, text: str, retries: int = 5) -> None:
 
 DEFAULT_TAU_HOURS = {
     "turn": 72,            # 原始对话：3 天
+    "evidence": 72,        # 工具结果：保留原文，默认不生成向量
     "fact": 24 * 60,       # 事实：2 个月
     "preference": 24 * 180,
     "decision": 24 * 365,  # 项目决策：1 年
@@ -105,7 +156,14 @@ CREATE TABLE IF NOT EXISTS items(
   due_at REAL,
   stale_note TEXT,
   audience TEXT DEFAULT 'public',
-  source_path TEXT DEFAULT ''
+  source_path TEXT DEFAULT '',
+  project_id TEXT DEFAULT '',
+  session_id TEXT DEFAULT '',
+  source_event_id TEXT DEFAULT '',
+  source_ids TEXT DEFAULT '[]',
+  epistemic_state TEXT DEFAULT '',
+  evidence_type TEXT DEFAULT '',
+  evidence TEXT DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS ix_items_path ON items(path, kind, status);
 CREATE INDEX IF NOT EXISTS ix_items_created ON items(created);
@@ -124,6 +182,15 @@ CREATE TABLE IF NOT EXISTS tombstones(
   audience TEXT DEFAULT '*',
   user_id TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS item_sources(
+  derived_id INTEGER NOT NULL, source_id INTEGER NOT NULL,
+  PRIMARY KEY(derived_id, source_id)
+);
+CREATE INDEX IF NOT EXISTS ix_item_sources_source ON item_sources(source_id);
+CREATE TABLE IF NOT EXISTS extraction_coverage(
+  path TEXT NOT NULL, project_id TEXT DEFAULT '', covered_id INTEGER DEFAULT 0, updated REAL NOT NULL,
+  session_id TEXT DEFAULT '', omissions TEXT DEFAULT '[]', PRIMARY KEY(path,project_id)
+);
 """
 
 # 老库升级：CREATE TABLE IF NOT EXISTS 不会给已有的表加列，这里补 ALTER TABLE
@@ -137,6 +204,13 @@ _MIGRATIONS = {
     "stale_note": "TEXT",      # 摘要里有过时说法时的备注（不失效整条摘要）
     "audience": "TEXT DEFAULT 'public'",
     "source_path": "TEXT DEFAULT ''",
+    "project_id": "TEXT DEFAULT ''",
+    "session_id": "TEXT DEFAULT ''",
+    "source_event_id": "TEXT DEFAULT ''",
+    "source_ids": "TEXT DEFAULT '[]'",
+    "epistemic_state": "TEXT DEFAULT ''",
+    "evidence_type": "TEXT DEFAULT ''",
+    "evidence": "TEXT DEFAULT '{}'",
 }
 
 # 老条目没有 trust：按路径回填。保守起见，群聊/评论区一律降级。
@@ -177,6 +251,13 @@ class Item:
     rel: float = 0.0        # 只算"相关性"、不算权重和时间衰减的得分（冷存储回想按它判断值不值得捞）
     audience: str = "public"
     source_path: str = ""
+    project_id: str = ""
+    session_id: str = ""
+    source_event_id: str = ""
+    source_ids: list[int] = field(default_factory=list)
+    epistemic_state: str = ""
+    evidence_type: str = ""
+    evidence: dict = field(default_factory=dict)
 
 
 class MemoryStore:
@@ -184,6 +265,7 @@ class MemoryStore:
         cfg = cfg or {}
         self.embedder = embedder            # 可选：CachedEmbedder（见 embedding.py）
         self.embed_turns = cfg.get("embed_turns", False)
+        self.embed_evidence = cfg.get("embed_evidence", False)
         self.sem_floor = cfg.get("sem_floor", 0.45)   # 余弦相似度低于它视为不相关
         self.dir = data_dir
         self.md_root = os.path.join(data_dir, "memory")
@@ -207,6 +289,8 @@ class MemoryStore:
         self.db.executescript(SCHEMA)
         self.db.commit()
         self._migrate()
+        from .projects import ProjectRegistry
+        self.projects = ProjectRegistry(self.db, self.lock, self.clock)
         if self.meta_get("index_version", 1) < INDEX_VERSION:
             self.reindex()
 
@@ -223,6 +307,8 @@ class MemoryStore:
                 self.db.execute("UPDATE items SET trust=? WHERE path LIKE ?", (level, pat))
         self.db.execute("UPDATE items SET trust='owner' WHERE trust IS NULL OR trust=''")
         self.db.execute("CREATE INDEX IF NOT EXISTS ix_items_trust ON items(trust)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS ix_items_project ON items(project_id,path)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS ix_items_event ON items(source_event_id,role,source_path)")
         if "audience" in added:
             for row in self.db.execute("SELECT id,path,trust FROM items").fetchall():
                 self.db.execute("UPDATE items SET audience=?,source_path=? WHERE id=?",
@@ -242,7 +328,10 @@ class MemoryStore:
               ts: float | None = None, mirror: bool = True, trust: str = "owner",
               pinned: bool = False, by_tombstone_ok: bool = False,
               due_at: float | None = None, valid_from: float | None = None,
-              reconcile: bool = True, audience: str | None = None, source_path: str = "") -> Optional[int]:
+              reconcile: bool = True, audience: str | None = None, source_path: str = "",
+              project_id: str = "", session_id: str = "", source_event_id: str = "",
+              source_ids: Iterable[int] = (), epistemic_state: str = "",
+              evidence_type: str = "", evidence: dict | None = None) -> Optional[int]:
         """写一条记忆。
 
         trust          来源可信度（见 TRUST_LEVELS）。检索时按场景过滤，默认 owner。
@@ -252,14 +341,22 @@ class MemoryStore:
                        检索的"时间感知"按它（而不是入库时间）判断条目属于哪一天。
         reconcile      写入前先做规则版冲突检测：新说法真的改了旧值时，把旧条目标成"已过时"。
         """
-        content = (content or "").strip()
-        if not content or importance < self.input_floor:
+        content = content or ""
+        if kind not in ("turn", "evidence"):
+            content = content.strip()
+        if not content.strip() or importance < self.input_floor:
             return None
         now = ts if ts is not None else self.clock()
         trust = trust if trust in TRUST_RANK else "owner"
         user_id = str(user_id or "")
         audience = str(audience) if audience is not None else self._default_audience(path, trust)
         source_path = str(source_path or (path if path.startswith(("chat/", "project/")) else ""))
+        project_id, session_id = str(project_id or ""), str(session_id or "")
+        source_event_id = str(source_event_id or "")
+        source_ids = list(dict.fromkeys(int(i) for i in source_ids if int(i) > 0))
+        evidence = dict(evidence or {})
+        if epistemic_state not in ("", "suggested", "accepted", "implemented", "verified"):
+            raise ValueError("unknown epistemic_state")
         tau = float(self.tau.get(kind, 72))
         if kind == "turn" and "/group/" in path:
             tau *= self.group_turn_tau_scale
@@ -267,30 +364,78 @@ class MemoryStore:
         merged = None
         replaced: list[int] = []
         with self.lock:
+            # Idempotence uses source identity, never the text: repeating the same
+            # sentence in a later turn remains a distinct event.
+            if source_event_id and kind in ("turn", "evidence"):
+                prior = self.db.execute(
+                    "SELECT id,content FROM items WHERE source_event_id=? AND role=? AND source_path=? "
+                    "AND project_id=? AND session_id=? ORDER BY id DESC",
+                    (source_event_id, role, source_path, project_id, session_id)).fetchone()
+                if prior:
+                    exact = self.db.execute(
+                        "SELECT id FROM items WHERE source_event_id=? AND role=? AND source_path=? "
+                        "AND project_id=? AND session_id=? AND content=? ORDER BY id DESC LIMIT 1",
+                        (source_event_id, role, source_path, project_id, session_id, content)).fetchone()
+                    if exact:
+                        return exact["id"]
+                    # A fuller or edited provider event is a revision, never silently lost.
+                    evidence["revision_of"] = prior["id"]
+            if source_ids:
+                sources = self.db.execute("SELECT * FROM items WHERE id IN (%s)" %
+                                          ",".join("?" * len(source_ids)), source_ids).fetchall()
+                if len(sources) != len(source_ids) or any(r["status"] == "deleted" for r in sources):
+                    return None
+                for source in sources:
+                    trust = stricter(trust, source["trust"] or "owner")
+                    if source["audience"] not in ("public", audience):
+                        return None
+                    if project_id and source["project_id"] and project_id != source["project_id"]:
+                        return None
+            if epistemic_state == "verified" and not self._verified_sources(source_ids, evidence):
+                epistemic_state = "implemented"
             if kind != "turn" and not by_tombstone_ok and self._tombstoned(content, audience=audience, user_id=user_id):
                 return None      # 用户删过这条：自动提炼不再把它复活
             if reconcile and kind != "turn" and self.auto_supersede:
-                replaced = self._reconcile(path, kind, content, user_id=user_id, audience=audience)
+                replaced = self._reconcile(path, kind, content, user_id=user_id, audience=audience,
+                                           project_id=project_id)
             if not replaced and dedup and kind != "turn":
-                dup = self._find_duplicate(path, kind, content, user_id=user_id, audience=audience)
+                dup = self._find_duplicate(path, kind, content, user_id=user_id, audience=audience,
+                                            project_id=project_id)
                 if dup is not None:
                     merged = self._merge_duplicate(dup, path, kind, content, importance, now, tag_s, trust)
             if merged is None:
                 cur = self.db.execute(
                     "INSERT INTO items(path,kind,role,speaker,content,importance,tau_h,created,last_access,"
-                    "tags,user_id,trust,pinned,valid_from,due_at,audience,source_path) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "tags,user_id,trust,pinned,valid_from,due_at,audience,source_path,project_id,session_id,"
+                    "source_event_id,source_ids,epistemic_state,evidence_type,evidence) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (path, kind, role, speaker, content, float(importance), tau, now, now, tag_s, user_id,
                      trust, 1 if pinned else 0, valid_from if valid_from is not None else now, due_at,
-                     audience, source_path))
+                     audience, source_path, project_id, session_id, source_event_id,
+                     json.dumps(source_ids), epistemic_state, evidence_type,
+                     json.dumps(evidence, ensure_ascii=False)))
                 iid = cur.lastrowid
                 self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)",
                                 (iid, index_text(content + " " + tag_s + " " + speaker)))
                 self.db.commit()
             else:
                 iid = merged
+                previous_state = self.db.execute("SELECT epistemic_state FROM items WHERE id=?", (iid,)).fetchone()[0]
+                states = ("", "suggested", "accepted", "implemented", "verified")
+                if epistemic_state and states.index(epistemic_state) >= states.index(previous_state or ""):
+                    self.db.execute("UPDATE items SET epistemic_state=?,evidence=? WHERE id=?",
+                                    (epistemic_state, json.dumps(evidence, ensure_ascii=False), iid))
+                    self.db.commit()
                 if due_at is not None:
                     self.db.execute("UPDATE items SET due_at=? WHERE id=? AND due_at IS NULL", (due_at, iid))
                     self.db.commit()
+            if source_ids:
+                previous = self.db.execute("SELECT source_ids FROM items WHERE id=?", (iid,)).fetchone()
+                combined = list(dict.fromkeys([*_json_list(previous["source_ids"]), *source_ids]))
+                self.db.execute("UPDATE items SET source_ids=? WHERE id=?", (json.dumps(combined), iid))
+                self.db.executemany("INSERT OR IGNORE INTO item_sources VALUES(?,?)",
+                                    [(iid, source) for source in source_ids if source != iid])
+                self.db.commit()
         if kind != "turn":
             with self.lock:
                 self._changed()
@@ -301,7 +446,8 @@ class MemoryStore:
         row = None
         if merged is not None:
             row = self.db.execute("SELECT content, importance FROM items WHERE id=?", (iid,)).fetchone()
-        if self.embedder is not None and (kind != "turn" or self.embed_turns):
+        if self.embedder is not None and (kind not in ("turn", "evidence")
+                or (kind == "turn" and self.embed_turns) or (kind == "evidence" and self.embed_evidence)):
             self._embed_ids([(iid, ((row["content"] if row else content) + " " + tag_s))])
         if mirror:
             if merged is None:
@@ -310,13 +456,117 @@ class MemoryStore:
                 self._rewrite_mirror_line(path, kind, iid, row["content"], row["importance"], now)
         return iid
 
+    def resolve_project_event(self, ev, mode: str = "registry"):
+        return self.projects.event(ev, mode)
+
+    def _project_filter(self, project_id: str, path: str, prefix: str = "items.") -> tuple[str, tuple]:
+        if not project_id:
+            return "", ()
+        legacy = not self.projects.collides(project_id)
+        sql = f" AND ({prefix}path NOT LIKE 'project/%' OR {prefix}project_id=?"
+        args: tuple = (project_id,)
+        if legacy:
+            sql += f" OR (COALESCE({prefix}project_id,'')='' AND {prefix}path=?)"
+            args += (path,)
+        return sql + ")", args
+
+    def _verified_sources(self, source_ids: list[int], evidence: dict) -> bool:
+        """Batch provenance is insufficient: verification needs selected tool evidence."""
+        selected = _json_list(evidence.get("verification_source_ids", []))
+        if not selected or any(i not in source_ids for i in selected):
+            return False
+        for source_id in selected:
+            row = self.db.execute("SELECT * FROM items WHERE id=?", (source_id,)).fetchone()
+            meta = _json_dict(row["evidence"]) if row else {}
+            if (not row or row["status"] == "deleted" or row["kind"] != "evidence"
+                    or row["evidence_type"] != "verification" or meta.get("origin") != "tool_result"
+                    or meta.get("outcome") != "passed" or type(meta.get("exit_code")) is not int
+                    or meta.get("exit_code") != 0
+                    or not meta.get("tool_call_id") or row["invalid_at"] is not None
+                    or not _verification_passed(str(meta.get("command") or meta.get("tool_name") or ""), row["content"])):
+                return False
+        return True
+
+    def _restorable_sources(self, row) -> bool:
+        source_ids = _json_list(row["source_ids"])
+        if source_ids:
+            sources = self.db.execute("SELECT status FROM items WHERE id IN (%s)" %
+                                      ",".join("?" * len(source_ids)), source_ids).fetchall()
+            if len(sources) != len(set(source_ids)) or any(source["status"] == "deleted" for source in sources):
+                return False
+        return row["epistemic_state"] != "verified" or self._verified_sources(source_ids, _json_dict(row["evidence"]))
+
+    def append_turn(self, ev, role: str, content: str, *, source_event_id: str | None = None,
+                    evidence: dict | None = None, trust: str = "owner",
+                    audience: str | None = None, importance: float = 0.6,
+                    speaker: str | None = None) -> Optional[int]:
+        if role not in ("user", "assistant", "tool"):
+            raise ValueError("unsupported event role")
+        meta = dict(evidence or {})
+        evidence_type = ""
+        if role == "tool":
+            evidence_type = "tool"
+            command = str(meta.get("command") or meta.get("tool_name") or "")
+            if (meta.get("origin") == "tool_result" and meta.get("tool_call_id")
+                    and type(meta.get("exit_code")) is int and meta.get("exit_code") == 0
+                    and _verification_passed(command, content)):
+                evidence_type = "verification"
+                meta["outcome"] = "passed"
+        return self.write(ev.path, "evidence" if role == "tool" else "turn", content,
+                          importance, role=role, speaker=speaker if speaker is not None else
+                          (ev.user_name if role == "user" else role),
+                          user_id=ev.user_id, trust=trust, audience=audience, ts=ev.ts,
+                          source_path=ev.path, project_id=ev.project_id, session_id=ev.session_id,
+                          source_event_id=source_event_id if source_event_id is not None else ev.event_id,
+                          evidence_type=evidence_type, evidence=meta, dedup=False,
+                          mirror=role != "tool", reconcile=False)
+
+    def mark_extraction_coverage(self, path: str, covered_id: int, *, omissions=(), session_id: str = "",
+                                 project_id: str = "") -> None:
+        """Only called after successful extraction; the cursor never moves backwards."""
+        with self.lock:
+            old = self.db.execute("SELECT covered_id FROM extraction_coverage WHERE path=? AND project_id=?",
+                                  (path, project_id)).fetchone()
+            if old and old["covered_id"] > int(covered_id):
+                return
+            self.db.execute("INSERT INTO extraction_coverage VALUES(?,?,?,?,?,?) ON CONFLICT(path,project_id) DO UPDATE "
+                            "SET covered_id=excluded.covered_id,updated=excluded.updated,"
+                            "session_id=excluded.session_id,omissions=excluded.omissions",
+                            (path, project_id, int(covered_id), self.clock(), str(session_id or ""),
+                             json.dumps(list(omissions), ensure_ascii=False)))
+            key = "extract_ptr:" + path + (":" + project_id if project_id else "")
+            self.meta_set(key, max(int(self.meta_get(key, 0) or 0), int(covered_id)))
+            self.db.commit()
+
+    def coverage(self, path: str, user_id: str | None = None, *, project_id: str = "") -> dict:
+        with self.lock:
+            state = self.db.execute("SELECT * FROM extraction_coverage WHERE path=? AND project_id=?",
+                                    (path, project_id)).fetchone()
+            key = "extract_ptr:" + path + (":" + project_id if project_id else "")
+            covered = state["covered_id"] if state else int(self.meta_get(key, 0) or 0)
+            sql = "SELECT id,source_event_id,session_id FROM items WHERE path=? AND kind='turn' AND status!='deleted'"
+            args: tuple = (path,)
+            if user_id is not None:
+                sql += " AND user_id=?"
+                args += (str(user_id),)
+            if project_id:
+                sql += " AND project_id=?"
+                args += (project_id,)
+            rows = self.db.execute(sql + " ORDER BY id", args).fetchall()
+            backlog = [r for r in rows if r["id"] > covered]
+        return {"path": path, "project_id": project_id, "total_turns": len(rows), "latest_id": rows[-1]["id"] if rows else 0,
+                "covered_id": covered, "backlog_turns": len(backlog),
+                "updated": state["updated"] if state else None,
+                "session_id": state["session_id"] if state else "",
+                "recent_omissions": _json_list(state["omissions"]) if state else []}
+
     def _merge_duplicate(self, dup: int, path: str, kind: str, content: str, importance: float,
                          now: float, tag_s: str, trust: str) -> int:
         """去重命中：更新数据库**和** Markdown 镜像、全文索引、向量。
 
         旧实现只改数据库，下次 sync_markdown() 会以 Markdown 为准把它改回旧内容。
         """
-        r = self.db.execute("SELECT content, tags, speaker, trust FROM items WHERE id=?", (dup,)).fetchone()
+        r = self.db.execute("SELECT content, tags, speaker, trust,epistemic_state FROM items WHERE id=?", (dup,)).fetchone()
         old = r["content"] if r else ""
         new_content = content if len(content) >= 0.8 * len(old) else old
         keep_trust = stricter(r["trust"] if r and r["trust"] else "owner", trust)
@@ -328,6 +578,8 @@ class MemoryStore:
         self.db.execute("INSERT INTO items_fts(rowid, tok) VALUES(?,?)",
                         (dup, index_text(new_content + " " + (r["tags"] or tag_s) + " " + (r["speaker"] or ""))))
         self.db.execute("DELETE FROM vecs WHERE id=?", (dup,))
+        if r and new_content != old and r["epistemic_state"] == "verified":
+            self.db.execute("UPDATE items SET epistemic_state='implemented',evidence='{}' WHERE id=?", (dup,))
         self.db.commit()
         return dup
 
@@ -351,7 +603,8 @@ class MemoryStore:
             rows = self.db.execute(
                 "SELECT items.id, items.content, items.tags FROM items LEFT JOIN vecs ON vecs.id=items.id "
                 "WHERE (vecs.id IS NULL OR vecs.model!=?) AND items.status!='merged' AND items.status!='deleted' "
-                + ("" if self.embed_turns else "AND items.kind!='turn' ") + "LIMIT ?",
+                + ("" if self.embed_turns else "AND items.kind!='turn' ")
+                + ("" if self.embed_evidence else "AND items.kind!='evidence' ") + "LIMIT ?",
                 (self.embedder.name, limit)).fetchall()
         n = 0
         for i in range(0, len(rows), batch):
@@ -395,11 +648,14 @@ class MemoryStore:
                 self.db.execute("INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", (key, value))
 
     def _find_duplicate(self, path: str, kind: str, content: str, thr: float = 0.75, *,
-                        user_id: str = "", audience: str = "public") -> Optional[int]:
+                        user_id: str = "", audience: str = "public", project_id: str = "") -> Optional[int]:
         q = fts_query(content)
         if not q:
             return None
         author_sql, author_args = self._author_filter(path, user_id)
+        if project_id:
+            author_sql += " AND items.project_id=?"
+            author_args += (project_id,)
         rows = self.db.execute(
             "SELECT items.id, items.content FROM items_fts JOIN items ON items.id=items_fts.rowid "
             "WHERE items_fts MATCH ? AND items.path=? AND items.kind=? AND items.audience=? "
@@ -412,7 +668,7 @@ class MemoryStore:
         return None
 
     def _reconcile(self, path: str, kind: str, content: str, *, user_id: str = "",
-                   audience: str | None = None) -> list[int]:
+                   audience: str | None = None, project_id: str = "") -> list[int]:
         """仅同一个发言者的同类事实可以互相取代；旧库空 ID 在非群聊路径兼容。"""
         group = _kind_group(kind)
         q = fts_query(content)
@@ -420,6 +676,9 @@ class MemoryStore:
             return []
         marks = ",".join("?" * len(group))
         author_sql, author_args = self._author_filter(path, user_id)
+        if project_id:
+            author_sql += " AND items.project_id=?"
+            author_args += (project_id,)
         if audience is not None:
             author_sql += " AND items.audience=?"
             author_args += (audience,)
@@ -452,7 +711,7 @@ class MemoryStore:
                 return False
         with self.lock:
             r = self.db.execute(
-                "SELECT id, path, kind, trust, user_id, audience, status, invalid_at FROM items WHERE id=?", (old_id,)).fetchone()
+                "SELECT id, path, kind, trust, user_id, audience, status, invalid_at,project_id FROM items WHERE id=?", (old_id,)).fetchone()
             if r is None or r["invalid_at"] is not None:
                 return False
             if r["status"] in ("deleted", "merged") or r["kind"] == "turn":
@@ -461,8 +720,9 @@ class MemoryStore:
                 log.info("拒绝用 %s 来源的记忆取代 #%s（%s）", new_trust, old_id, r["trust"])
                 return False
             if new_id is not None:
-                new = self.db.execute("SELECT user_id,audience FROM items WHERE id=?", (new_id,)).fetchone()
+                new = self.db.execute("SELECT user_id,audience,project_id FROM items WHERE id=?", (new_id,)).fetchone()
                 if (new is None or r["audience"] != new["audience"]
+                        or r["project_id"] != new["project_id"]
                         or (r["user_id"] and new["user_id"] and r["user_id"] != new["user_id"])):
                     return False
             at = self.clock() if at is None else at
@@ -485,7 +745,7 @@ class MemoryStore:
         整条失效会把摘要里的其他信息一起藏起来（"注册上限每天 20 个"跟着"部署在香橙派"一起消失）。
         渲染时在行尾追加"（注意：…已过时，现为…）"，旧说法不冒充现状，其他内容还在。
         """
-        r = self.db.execute("SELECT content,source_path FROM items WHERE id=?", (old_id,)).fetchone()
+        r = self.db.execute("SELECT content,source_path,project_id FROM items WHERE id=?", (old_id,)).fetchone()
         old_tokens = set(tokens(r["content"])) if r else set()
         if len(old_tokens) < 3:
             return
@@ -498,8 +758,8 @@ class MemoryStore:
         note = f"其中「{old_short}」已过时" + (f"（现在：{new_short}）" if new_short else "")
         rows = self.db.execute(
             "SELECT id, content, stale_note FROM items WHERE (path=? OR path=?) AND kind='summary' "
-            "AND invalid_at IS NULL AND status NOT IN ('deleted','merged') LIMIT 200",
-            (path, r["source_path"] or path)).fetchall()
+            "AND project_id=? AND invalid_at IS NULL AND status NOT IN ('deleted','merged') LIMIT 200",
+            (path, r["source_path"] or path, r["project_id"])).fetchall()
         for x in rows:
             st = set(tokens(x["content"]))
             if not st or len(old_tokens & st) / len(old_tokens) < 0.6:
@@ -582,7 +842,8 @@ class MemoryStore:
                include_cold: bool = False, public: bool = False, allow_projects: bool = True,
                allowed_trusts: Iterable[str] | None = None, count: bool = True,
                include_history: bool = False, window: tuple[float, float] | None = None,
-               only_cold: bool = False, allowed_audiences: Iterable[str] | None = None) -> list[Item]:
+               only_cold: bool = False, allowed_audiences: Iterable[str] | None = None,
+               project_id: str = "") -> list[Item]:
         """先搜当前分支子树，结果不够就逐级回退：父分支 → ... → core → 全局（全局打折最狠）
 
         隐私规则（回退到别的分支时生效）：
@@ -649,6 +910,7 @@ class MemoryStore:
                     % (extra_in, hidden_sql, trust_sql))
         pargs = (path, *extras, *targs)
         with self.lock:
+            project_sql, project_args = self._project_filter(project_id, path)
             for si, (scope, d) in enumerate(scopes):
                 if scope == path:
                     where = f"(items.path=? OR items.path LIKE ?) AND {status_sql}{kind_sql}{trust_sql}"
@@ -662,8 +924,8 @@ class MemoryStore:
                 else:
                     where = f"{status_sql}{kind_sql}{priv_sql}"
                     wargs = pargs
-                where += audience_sql
-                wargs = (*wargs, *audiences)
+                where += audience_sql + project_sql
+                wargs = (*wargs, *audiences, *project_args)
                 cand: dict[int, list] = {}   # id -> [row, 字词相关度, 语义相关度]
                 if q:
                     for r in self.db.execute(
@@ -673,8 +935,11 @@ class MemoryStore:
                             cand[r["id"]] = [r, overlap(qtok, r["content"] + " " + (r["tags"] or "")), 0.0]
                 if qv is not None:
                     rows = self.db.execute(
-                        f"SELECT items.*, vecs.v AS _v FROM items JOIN vecs ON vecs.id=items.id WHERE {where}",
-                        wargs).fetchall()
+                        f"SELECT items.*, vecs.v AS _v FROM items JOIN vecs ON vecs.id=items.id "
+                        f"WHERE {where} AND vecs.model=?",
+                        (*wargs, self.embedder.name)).fetchall()
+                    # Same-model corrupt/mismatched dimensions also fall back to FTS.
+                    rows = [r for r in rows if len(r["_v"]) == len(qv) * 4]
                     sims = cosines(qv, [r["_v"] for r in rows])
                     top = sorted(((sm, r) for sm, r in zip(sims, rows) if sm >= self.sem_floor),
                                  key=lambda x: -x[0])[:20]
@@ -761,16 +1026,18 @@ class MemoryStore:
             self.meta_set("index_version", INDEX_VERSION)
         return len(rows)
 
-    def recent_turns(self, path: str, n: int = 12) -> list[Item]:
+    def recent_turns(self, path: str, n: int = 12, *, project_id: str = "") -> list[Item]:
         with self.lock:
+            project_sql, project_args = self._project_filter(project_id, path, "")
             rows = self.db.execute(
                 "SELECT * FROM items WHERE path=? AND kind='turn' AND status!='deleted' "
+                + project_sql +
                 "ORDER BY created DESC, id DESC LIMIT ?",
-                (path, n)).fetchall()
+                (path, *project_args, n)).fetchall()
         return [_item(r) for r in reversed(rows)]
 
     def by_path(self, path: str, kinds: Iterable[str] | None = None, limit: int = 20, *,
-                allowed_audiences: Iterable[str] | None = None) -> list[Item]:
+                allowed_audiences: Iterable[str] | None = None, project_id: str = "") -> list[Item]:
         sql = ("SELECT * FROM items WHERE (path=? OR path LIKE ?) AND invalid_at IS NULL "
                "AND (status='hot' OR (COALESCE(pinned,0)=1 AND status='cold'))")
         args: list = [path, path + "/%"]
@@ -783,6 +1050,9 @@ class MemoryStore:
             sql += " AND kind IN (%s)" % ",".join("?" * len(kinds))
             args += kinds
         with self.lock:
+            project_sql, project_args = self._project_filter(project_id, path, "")
+            sql += project_sql
+            args += project_args
             rows = self.db.execute(sql + " ORDER BY importance DESC, last_access DESC LIMIT ?",
                                    args + [limit]).fetchall()
         return [_item(r) for r in rows]
@@ -802,9 +1072,14 @@ class MemoryStore:
                 "created": r["created"], "valid_from": r["valid_from"],
                 "invalid_at": r["invalid_at"], "superseded_by": r["superseded_by"],
                 "stale_note": r["stale_note"], "audience": r["audience"] or "public",
-                "source_path": r["source_path"] or r["path"], "user_id": r["user_id"] or ""}
+                "source_path": r["source_path"] or r["path"], "user_id": r["user_id"] or "",
+                "project_id": r["project_id"] or "", "session_id": r["session_id"] or "",
+                "source_event_id": r["source_event_id"] or "", "source_ids": _json_list(r["source_ids"]),
+                "epistemic_state": r["epistemic_state"] or "", "evidence_type": r["evidence_type"] or "",
+                "evidence": _json_dict(r["evidence"])}
 
-    def timeline(self, limit: int = 20, path: str | None = None, top: bool = False) -> dict:
+    def timeline(self, limit: int = 20, path: str | None = None, top: bool = False, *,
+                 project_id: str = "") -> dict:
         """最近的记忆：新增的（recent）和刚被取代的（superseded，带旧值/新值）。
 
         只列提炼过的条目（turn 是原始对话流水，不是"记忆"）；被合并进摘要的不列。
@@ -814,13 +1089,16 @@ class MemoryStore:
             limit = max(1, min(int(limit or 20), 200))
         except (TypeError, ValueError):
             limit = 20
-        cond = "kind!='turn' AND status NOT IN ('merged','deleted')"
+        cond = "kind NOT IN ('turn','evidence') AND status NOT IN ('merged','deleted')"
         args: list = []
         if path:
             cond += " AND (path=? OR path LIKE ?)"
             args = [path, path + "/%"]
         order = "importance DESC, created DESC, id DESC" if top else "created DESC, id DESC"
         with self.lock:
+            project_sql, project_args = self._project_filter(project_id, path or "", "")
+            cond += project_sql
+            args += project_args
             recent = [self.brief(r) for r in self.db.execute(
                 f"SELECT * FROM items WHERE {cond} AND invalid_at IS NULL "
                 f"ORDER BY {order} LIMIT ?", (*args, limit)).fetchall()]
@@ -862,6 +1140,14 @@ class MemoryStore:
         paths = list(dict.fromkeys(p for p in (row["path"], row["source_path"]) if p))
         clauses = ["parent_id=?"]
         args: list = [row["id"]]
+        # Exact provenance follows transitive dependencies, independent of wording.
+        linked = {r[0] for r in self.db.execute(
+            "WITH RECURSIVE deps(id) AS (SELECT derived_id FROM item_sources WHERE source_id=? "
+            "UNION SELECT s.derived_id FROM item_sources s JOIN deps d ON s.source_id=d.id) "
+            "SELECT id FROM deps", (row["id"],))}
+        if linked:
+            clauses.append("id IN (%s)" % ",".join("?" * len(linked)))
+            args += sorted(linked)
         if paths:
             clauses.append("(kind='summary' AND path IN (%s))" % ",".join("?" * len(paths)))
             args += paths
@@ -873,8 +1159,11 @@ class MemoryStore:
             "AND id!=? AND status!='deleted'", (*args, row["id"])).fetchall()
         derived = []
         for candidate in rows:
-            direct = candidate["parent_id"] == row["id"] or candidate["id"] == row["parent_id"]
+            direct = (candidate["parent_id"] == row["id"] or candidate["id"] == row["parent_id"]
+                      or candidate["id"] in linked)
             if not direct:
+                if row["project_id"] != candidate["project_id"]:
+                    continue
                 if (row["user_id"] and candidate["user_id"]
                         and row["user_id"] != candidate["user_id"]):
                     continue
@@ -900,6 +1189,8 @@ class MemoryStore:
         with self.lock:
             r = self.db.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone()
             if r is None or r["kind"] == "turn":
+                return None
+            if not self._restorable_sources(r):
                 return None
             path, kind, content = r["path"], r["kind"], r["content"]
             was_superseded = r["invalid_at"] is not None
@@ -1050,7 +1341,7 @@ class MemoryStore:
             if not ids:
                 return
             rows = self.db.execute(
-                "SELECT * FROM items WHERE id IN (%s) AND kind!='turn' AND status NOT IN ('merged','deleted')"
+                "SELECT * FROM items WHERE id IN (%s) AND kind NOT IN ('turn','evidence') AND status NOT IN ('merged','deleted')"
                 % ",".join("?" * len(ids)), tuple(ids)).fetchall()
             cache: dict[str, str] = {}
             for r in rows:
@@ -1085,13 +1376,14 @@ class MemoryStore:
     def consolidation_candidates(self, min_count: int = 30) -> list[tuple[str, list[Item]]]:
         with self.lock:
             rows = self.db.execute(
-                "SELECT path, COUNT(*) c FROM items WHERE kind='turn' AND status='cold' GROUP BY path HAVING c>=?",
+                "SELECT path,project_id, COUNT(*) c FROM items WHERE kind='turn' AND status='cold' "
+                "GROUP BY path,project_id HAVING c>=?",
                 (min_count,)).fetchall()
             out = []
             for r in rows:
                 its = self.db.execute(
-                    "SELECT * FROM items WHERE path=? AND kind='turn' AND status='cold' ORDER BY created LIMIT 200",
-                    (r["path"],)).fetchall()
+                    "SELECT * FROM items WHERE path=? AND project_id=? AND kind='turn' AND status='cold' "
+                    "ORDER BY created LIMIT 200", (r["path"],r["project_id"])).fetchall()
                 out.append((r["path"], [_item(x) for x in its]))
         return out
 
@@ -1115,8 +1407,15 @@ class MemoryStore:
             user_id = next(iter(users)) if len(users) == 1 else ""
             sources = {r["source_path"] or r["path"] for r in rows}
             source_path = next(iter(sources)) if len(sources) == 1 else path
+            projects = {r["project_id"] or "" for r in rows}
+            if len(projects) > 1:
+                return None
+            project_id = next(iter(projects))
+            sessions = {r["session_id"] or "" for r in rows}
+            session_id = next(iter(sessions)) if len(sessions) == 1 else ""
         sid = self.write(path, "summary", summary, importance, dedup=False, trust=trust,
-                         user_id=user_id, audience=audience, source_path=source_path)
+                         user_id=user_id, audience=audience, source_path=source_path,
+                         project_id=project_id, session_id=session_id, source_ids=source_ids)
         if sid is None:
             return None
         with self.lock:
@@ -1241,10 +1540,19 @@ class MemoryStore:
                         if r is None:
                             continue
                         if r["content"] != content or r["kind"] != kind or r["status"] == "deleted":
-                            if r["content"] != content:
+                            edited = r["content"] != content or r["kind"] != kind
+                            if not edited and r["status"] == "deleted" and not self._restorable_sources(r):
+                                continue
+                            if edited:
                                 self.add_tombstone(r["content"], audience=r["audience"], user_id=r["user_id"])
                                 for derived in self._forget_derived(r):
                                     removed[derived["id"]] = derived
+                                # Manual wording/type changes are a new accepted claim,
+                                # not implementation or verification of the old claim.
+                                self.db.execute("UPDATE items SET epistemic_state=?,evidence='{}',evidence_type='',"
+                                                "source_ids='[]',valid_from=? WHERE id=?",
+                                                ("accepted" if r["epistemic_state"] else "", now, iid))
+                                self.db.execute("DELETE FROM item_sources WHERE derived_id=?", (iid,))
                             if r["status"] == "deleted":
                                 self._drop_tombstone(content, audience=r["audience"], user_id=r["user_id"])
                             self.db.execute("UPDATE items SET content=?, kind=?, status='hot', last_access=? WHERE id=?",
@@ -1309,7 +1617,7 @@ class MemoryStore:
     def _mirror(self, path, kind, content, iid, imp, speaker, role, ts) -> None:
         d = os.path.join(self.md_root, *path.split("/"))
         tm = time.localtime(ts)
-        if kind == "turn":
+        if kind in ("turn", "evidence"):
             fn = os.path.join(d, time.strftime("%Y-%m", tm) + ".md")
             who = speaker or role
             line = f"- `{time.strftime('%m-%d %H:%M', tm)}` **{who}**: {content.replace(chr(10), ' ')}\n"
@@ -1413,4 +1721,27 @@ def _in_window(r, window: tuple[float, float]) -> bool:
 
 def _item(r) -> Item:
     keys = Item.__dataclass_fields__.keys()
-    return Item(**{k: r[k] for k in r.keys() if k in keys})
+    data = {k: r[k] for k in r.keys() if k in keys}
+    data["source_ids"] = _json_list(data.get("source_ids"))
+    data["evidence"] = _json_dict(data.get("evidence"))
+    return Item(**data)
+
+
+def _json_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    try:
+        result = json.loads(value or "[]")
+        return result if isinstance(result, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def _json_dict(value) -> dict:
+    if isinstance(value, dict):
+        return value
+    try:
+        result = json.loads(value or "{}")
+        return result if isinstance(result, dict) else {}
+    except (TypeError, ValueError):
+        return {}

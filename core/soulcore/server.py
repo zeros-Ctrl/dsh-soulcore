@@ -11,15 +11,37 @@ HTTP 服务：给任意 harness（JS/TS/Python 都行）调用的钩子接口 + 
   POST /onebot                        OneBot v11 HTTP 上报地址
 """
 from __future__ import annotations
-import json, logging, os, secrets, socket, sys, threading, time
+import json, logging, math, os, re, secrets, socket, sys, threading, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 from . import __version__
 from .events import Event
 from .emotion import EVENTS
+from .usage import record_request, usage_scope
 
 log = logging.getLogger("soulcore.server")
+
+
+def _usage_counters(value):
+    """Ignore all content-bearing fields at the host accounting boundary."""
+    if not isinstance(value, dict):
+        return None
+    out = {}
+    for key in ("prompt_tokens", "input_tokens", "completion_tokens", "output_tokens", "total_tokens",
+                "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "reasoning_tokens"):
+        number = value.get(key)
+        if type(number) is int and 0 <= number <= 2**53-1:
+            out[key] = number
+    for key in ("prompt_tokens_details", "input_tokens_details", "completion_tokens_details", "output_tokens_details"):
+        details = value.get(key)
+        if not isinstance(details, dict):
+            continue
+        selected = {name: details[name] for name in ("cached_tokens", "reasoning_tokens")
+                    if type(details.get(name)) is int and 0 <= details[name] <= 2**53-1}
+        if selected:
+            out[key] = selected
+    return out
 
 
 def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
@@ -63,6 +85,17 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                 return self._send(200, {"ok": True, "name": engine.name})
             if u.path == "/v1/state":
                 return self._send(200, engine.state())
+            if u.path == "/v1/usage":
+                ledger = getattr(engine, "usage", None)
+                if ledger is None:
+                    return self._send(503, {"error": "usage accounting unavailable"})
+                try:
+                    since = float(qs["since"][0]) if "since" in qs else None
+                    if since is not None and not math.isfinite(since):
+                        raise ValueError("non-finite since")
+                except (TypeError, ValueError):
+                    return self._send(400, {"error": "since must be a finite timestamp"})
+                return self._send(200, ledger.snapshot(since=since))
             if u.path == "/v1/persona":
                 return self._send(200, {"name": engine.name, "text": engine.card_text()})
             if u.path == "/v1/persona/stable":
@@ -77,16 +110,27 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                 return self._send(200, it.status() if it else {"enabled": False, "available": False})
             if u.path == "/v1/memory/search":
                 extra = [x for x in qs.get("extra", [""])[0].split(",") if x]
-                its = engine.store.search(qs.get("q", [""])[0], qs.get("path", ["core"])[0],
-                                          k=int(qs.get("k", ["10"])[0]),
-                                          touch=qs.get("touch", ["0"])[0].lower() in ("1", "true", "yes"),
-                                          include_history=qs.get("history", ["0"])[0].lower() in ("1", "true", "yes"),
-                                          extra_paths=extra, allowed_trusts=("owner",),
-                                          allowed_audiences=("public", "owner"))
+                try:
+                    limit = max(1, min(100, int(qs.get("k", ["10"])[0])))
+                except ValueError:
+                    return self._send(400, {"error": "k must be an integer"})
+                with usage_scope("retrieval"):
+                    its = engine.store.search(qs.get("q", [""])[0], qs.get("path", ["core"])[0],
+                                              k=limit,
+                                              touch=qs.get("touch", ["0"])[0].lower() in ("1", "true", "yes"),
+                                              include_history=qs.get("history", ["0"])[0].lower() in ("1", "true", "yes"),
+                                              extra_paths=extra, allowed_trusts=("owner",),
+                                              allowed_audiences=("public", "owner"),
+                                              project_id=qs.get("project_id", [""])[0])
                 return self._send(200, [{"id": i.id, "path": i.path, "kind": i.kind, "content": i.content,
                                          "trust": i.trust, "pinned": bool(i.pinned),
                                          "created": i.created, "valid_from": i.valid_from,
                                          "invalid_at": i.invalid_at, "stale_note": i.stale_note,
+                                         "source_path": i.source_path,
+                                         "source_ids": i.source_ids, "source_event_id": i.source_event_id,
+                                         "project_id": i.project_id, "session_id": i.session_id,
+                                         "evidence_type": i.evidence_type, "evidence": i.evidence,
+                                         "epistemic_state": i.epistemic_state,
                                          "score": round(i.score, 4), "weight": round(i.weight_now, 4)}
                                         for i in its])
             if u.path == "/v1/memory/timeline":
@@ -96,7 +140,8 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                     limit = 20
                 top = qs.get("top", ["0"])[0].lower() in ("1", "true", "yes", "importance")
                 return self._send(200, engine.store.timeline(
-                    limit, qs.get("path", [""])[0] or None, top=top))
+                    limit, qs.get("path", [""])[0] or None, top=top,
+                    project_id=qs.get("project_id", [""])[0]))
             return self._send(404, {"error": "not found"})
 
         def do_POST(self):
@@ -115,7 +160,30 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                 b = self._body()
             except json.JSONDecodeError:
                 return self._send(400, {"error": "bad json"})
+            if not isinstance(b, dict):
+                return self._send(400, {"error": "body must be an object"})
             try:
+                if u.path == "/v1/usage":
+                    ledger = getattr(engine, "usage", None)
+                    if ledger is None:
+                        return self._send(503, {"error": "usage accounting unavailable"})
+                    purpose = b.get("purpose", "host_online")
+                    if purpose not in ("host_online", "host_compaction"):
+                        return self._send(400, {"error": "unsupported host usage purpose"})
+                    if type(b.get("success", True)) is not bool:
+                        return self._send(400, {"error": "success must be a boolean"})
+                    elapsed = b.get("elapsed_ms", 0)
+                    if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)) or not math.isfinite(elapsed) or elapsed < 0:
+                        return self._send(400, {"error": "elapsed_ms must be finite and nonnegative"})
+                    error_type = b.get("error_type", "")
+                    error_type = error_type if isinstance(error_type, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]{0,79}|", error_type) else "Error"
+                    row = record_request(ledger,
+                        provider=b.get("provider") if isinstance(b.get("provider"), str) and b["provider"] else "dsh",
+                        model=b.get("model") if isinstance(b.get("model"), str) and b["model"] else "unknown",
+                        purpose=purpose, operation="chat", usage=_usage_counters(b.get("usage")),
+                        success=b.get("success", True), elapsed_ms=elapsed,
+                        status_code=b.get("status_code"), error_type=error_type)
+                    return self._send(200, {"ok": True, "recorded": row is not None, "enabled": ledger.enabled})
                 if u.path == "/v1/qq/test":
                     from .adapters.onebot_ws import probe
                     return self._send(200, probe(str(b.get("ws_url") or ""), str(b.get("access_token") or ""),
@@ -158,6 +226,11 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                         return self._send(404, {"error": "没有这条记忆（原始对话不能删/恢复）"})
                     return self._send(200, {"ok": True, "item": item})
                 ev = Event.from_dict(b.get("event", {}))
+                if u.path == "/v1/projects/resolve":
+                    ev = engine.store.resolve_project_event(ev, mode=engine.mcfg.get("project_identity", "registry"))
+                    info = ev.raw.get("project_identity", {}) if isinstance(ev.raw, dict) else {}
+                    return self._send(200, {**info, "project_id": ev.project_id, "path": ev.path,
+                                            "channel_id": ev.channel_id})
                 if u.path == "/v1/chat":
                     reply = engine.handle(ev, reply=b.get("reply", True))
                     st = engine.state()
@@ -183,7 +256,7 @@ def make_handler(engine, onebot=None, token: str = "", ctl: dict | None = None):
                 if u.path == "/v1/hooks/pre_compact":
                     n = engine.pre_compact(ev, b.get("messages", []))
                     return self._send(200, {"ok": True, "extracted": n})
-            except TypeError as ex:
+            except (TypeError, ValueError) as ex:
                 return self._send(400, {"error": f"bad event: {ex}"})
             except Exception as ex:
                 log.exception("处理请求失败")

@@ -87,8 +87,29 @@ def make_event(payload: dict, cfg: dict, text: str = "") -> dict:
     return {"platform": "local", "scene": "project",
             "channel_id": project_name(payload.get("cwd"), payload.get("session_id", "")),
             "user_id": "owner", "user_name": owner,
-            "text": (text or "")[:4000], "mentions_self": True, "ts": time.time(),
+            "text": text or "", "mentions_self": True, "ts": time.time(),
+            "cwd": str(payload.get("cwd") or ""),
+            "session_id": str(payload.get("session_id") or ""),
+            "event_id": str(payload.get("uuid") or payload.get("event_id") or ""),
             "raw": {"client": "claude-code", "session_id": str(payload.get("session_id") or "")}}
+
+
+def resolve_project_event(backend, event: dict, timeout: float = 2.0, *, strict: bool = False) -> dict:
+    """Resolve routing through the shared backend; older backends remain usable."""
+    if not (event.get("cwd") or event.get("project_id") or event.get("raw", {}).get("resolve_project_name")):
+        return event
+    try:
+        info = backend.request("POST", "/v1/projects/resolve", {"event": event}, timeout=timeout)
+        if isinstance(info, dict) and info.get("project_id") and info.get("channel_id"):
+            return {**event, "project_id": info["project_id"], "channel_id": info["channel_id"],
+                    "raw": {**event.get("raw", {}), "project_identity": info}}
+        if strict:
+            raise ValueError("项目尚未绑定稳定身份，请在目标项目目录中接入，或指定已注册的 project UUID")
+    except BackendUnavailable:
+        if strict:
+            raise
+        pass
+    return event
 
 
 # ------------------------------------------------------------------ transcript 解析
@@ -120,7 +141,7 @@ def _is_real_user(obj: dict) -> bool:
     return False
 
 
-def transcript_reply(path: str | None, limit: int = 4000) -> str:
+def transcript_reply(path: str | None, limit: int | None = 4000) -> str:
     """从 transcript JSONL 里取"本轮最终的 assistant 文本"。
 
     - 逐行容错解析，坏行跳过；
@@ -163,20 +184,20 @@ def transcript_reply(path: str | None, limit: int = 4000) -> str:
                 if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str):
                     parts.append(b["text"])
     text = "\n".join(p.strip() for p in parts if p.strip())
-    return text[:limit]
+    return text[:limit] if limit is not None else text
 
 
 def last_assistant_text(payload: dict) -> str:
     """Stop 事件的最终回复：优先用官方提供的 last_assistant_message，没有才翻 transcript。"""
     raw = payload.get("last_assistant_message")
     if isinstance(raw, str) and raw.strip():
-        return raw.strip()[:4000]
+        return raw.strip()
     if isinstance(raw, list):
         parts = [b.get("text", "") for b in raw if isinstance(b, dict) and b.get("type") == "text"]
         text = "\n".join(p for p in parts if p).strip()
         if text:
-            return text[:4000]
-    return transcript_reply(payload.get("transcript_path"))
+            return text
+    return transcript_reply(payload.get("transcript_path"), limit=None)
 
 
 # ------------------------------------------------------------------ 各事件
@@ -195,7 +216,10 @@ def _fmt_memory(items) -> str:
     for r in items:
         content = str(r.get("content") or "").strip().replace("\n", " ")
         if content:
-            out.append(f"- [{r.get('kind', 'fact')}] {content[:200]}")
+            state = {"suggested": "提议", "accepted": "已接受", "implemented": "已实施",
+                     "verified": "有验证证据"}.get(r.get("epistemic_state"), "")
+            label = str(r.get("kind", "fact")) + ("·" + state if state else "")
+            out.append(f"- [{label}] {content[:200]}")
     return "\n".join(out)
 
 
@@ -203,6 +227,7 @@ def handle_session_start(payload, backend, cfg, style, deadline):
     ev = make_event(payload, cfg)
     if backend.ensure(start=True, wait_s=min(3.0, _remaining(deadline, 3.0))) is None:
         return None
+    ev = resolve_project_event(backend, ev, timeout=_remaining(deadline, 1.0))
     parts: list[str] = []
     if style == "companion":
         try:
@@ -213,7 +238,8 @@ def handle_session_start(payload, backend, cfg, style, deadline):
             pass
     try:
         path = quote("project/" + ev["channel_id"], safe="")
-        data = backend.request("GET", f"/v1/memory/timeline?path={path}&limit=20&top=1",
+        pid = quote(ev.get("project_id", ""), safe="")
+        data = backend.request("GET", f"/v1/memory/timeline?path={path}&project_id={pid}&limit=20&top=1",
                                timeout=_remaining(deadline)) or {}
         rows = [r for r in (data.get("recent") or []) if r.get("kind") in MEMORY_KINDS][:5]
         body = _fmt_memory(rows)

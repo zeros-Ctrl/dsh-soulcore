@@ -3,7 +3,13 @@ from __future__ import annotations
 import re
 
 _TOKEN = re.compile(r"[A-Za-z0-9_\-\.]+|[一-鿿]+")
+_SOURCE_PREFIX = re.compile(r"^(?:\[来源编号#[0-9]+\]\s*)+")
 STOP = set("的了是我你他她它们在和就也都而及与着或一个这那吗呢吧啊哦嗯呀")
+
+
+def strip_source_prefix(text: str) -> str:
+    """只移除提炼格式的行首来源标记；编号仍保存在结构化 source_ids 中。"""
+    return _SOURCE_PREFIX.sub("", (text or "").strip())
 
 
 def tokens(text: str) -> list[str]:

@@ -78,6 +78,9 @@ class BiliChat:
         self._replied_at: dict[str, float] = {}
         self.after_reply_gap_s = 8.0      # 测试里设为 0
         self._lock = threading.Lock()
+        self._watch_lock = threading.RLock()
+        self._stopped = threading.Event()
+        self._watch_threads: set[threading.Thread] = set()
 
     # ------------------------------------------------------------------ 配置 / 状态
     @property
@@ -206,55 +209,99 @@ class BiliChat:
 
     def on_reply(self, ev: Event) -> None:
         """commit_reply 调用：她那句"我去看看"已经发出，后台的"看完了"可以跟上。"""
-        done = self._replied.get(ev.path)
-        if done is not None:
-            self._replied_at[ev.path] = time.time()
-            done.set()
+        with self._watch_lock:
+            done = self._replied.get(ev.path)
+            if done is not None:
+                self._replied_at[ev.path] = time.time()
+                done.set()
 
     def discard_reply(self, ev: Event) -> None:
         """第一句没发出去时，取消对应的后台跟进。"""
-        done = self._replied.pop(ev.path, None)
-        self._replied_at.pop(ev.path, None)
-        if done is not None:
+        with self._watch_lock:
+            done = self._replied.pop(ev.path, None)
+            self._replied_at.pop(ev.path, None)
+            if done is not None:
+                done.set()
+
+    def close(self, timeout: float = 2.0) -> None:
+        """Cancel owned workers before the engine closes its databases.
+
+        Network/model calls cannot be interrupted safely. They may finish after
+        the bounded join, but stopped workers cannot prepare or commit then.
+        """
+        with self.engine.lock:
+            with self._watch_lock:
+                self._stopped.set()
+                waiting = list(self._replied.values())
+                self._replied.clear()
+                self._replied_at.clear()
+                workers = list(self._watch_threads)
+        for done in waiting:
             done.set()
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        for worker in workers:
+            if worker is not threading.current_thread():
+                worker.join(max(0.0, deadline - time.monotonic()))
+
+    def _watch_current(self, ev: Event, done: threading.Event) -> bool:
+        with self._watch_lock:
+            return not self._stopped.is_set() and self._replied.get(ev.path) is done
 
     # ------------------------------------------------------------------ 后台：看完再说
     def _start_watch(self, ev: Event, tgt: dict) -> None:
-        self.discard_reply(ev)
-        done = threading.Event()
-        self._replied[ev.path] = done
-        self._replied_at.pop(ev.path, None)
-        threading.Thread(target=self._watch_job, args=(ev, tgt, done), daemon=True, name="bili-video").start()
+        with self._watch_lock:
+            if self._stopped.is_set():
+                return
+            self.discard_reply(ev)
+            done = threading.Event()
+            self._replied[ev.path] = done
+            worker = threading.Thread(target=self._watch_job, args=(ev, tgt, done), daemon=True, name="bili-video")
+            self._watch_threads.add(worker)
+            worker.start()
 
     def _watch_job(self, ev: Event, tgt: dict, done: threading.Event) -> None:
         try:
+            if not self._watch_current(ev, done):
+                return
             msg = self.watch_and_compose(ev, tgt)
-            if not done.wait(60) or self._replied.get(ev.path) is not done:
+            if not done.wait(60) or not self._watch_current(ev, done):
                 return                   # 第一条未发送，或该任务已被取消/替换
-            left = self.after_reply_gap_s - (time.time() - self._replied_at.get(ev.path, 0.0))
-            if left > 0:
-                time.sleep(left)
-            if msg and self._replied.get(ev.path) is done:
+            with self._watch_lock:
+                left = self.after_reply_gap_s - (time.time() - self._replied_at.get(ev.path, 0.0))
+            if left > 0 and self._stopped.wait(left):
+                return
+            if msg and self._watch_current(ev, done):
                 self._deliver(ev, msg)
         except Exception:
-            log.exception("看视频失败")
+            if not self._stopped.is_set():
+                log.exception("看视频失败")
         finally:
-            if self._replied.get(ev.path) is done:
-                self._replied.pop(ev.path, None)
-                self._replied_at.pop(ev.path, None)
+            with self._watch_lock:
+                if self._replied.get(ev.path) is done:
+                    self._replied.pop(ev.path, None)
+                    self._replied_at.pop(ev.path, None)
+                self._watch_threads.discard(threading.current_thread())
 
     def watch_and_compose(self, ev: Event, tgt: dict) -> str | None:
         from .bili_watch import fetch_subtitles, search_videos
+        if self._stopped.is_set():
+            return None
         cfg = self.cfg
         bv, title = tgt.get("bv", ""), tgt.get("title", "")
         if not bv and title:                      # 只给了标题：先搜，取第一个
             res = search_videos(cfg, title, 1)
+            if self._stopped.is_set():
+                return None
             if not res:
                 return self.compose(ev, title, None, "在B站没搜到这个视频")
             bv, title = res[0]["bv"], res[0]["title"]
         sub = fetch_subtitles(cfg, bv, self.work_dir)
+        if self._stopped.is_set():
+            return None
         title = sub.get("title") or title or bv
         summary = self.summarize(title, sub["text"]) if sub.get("text") else None
+        if self._stopped.is_set():
+            return None
         return self.compose(ev, title, summary, sub.get("reason") or "没拿到字幕")
 
     def summarize(self, title: str, text: str) -> str | None:
@@ -271,7 +318,10 @@ class BiliChat:
         eng = self.engine
         ev2 = Event(ev.platform, ev.scene, ev.channel_id, ev.user_id, ev.user_name, f"（你刚看完《{title}》）",
                     mentions_self=True, ts=eng.clock(), reply_target=ev.reply_target, raw={"internal": "bili"})
-        ctx = eng.prepare(ev2)
+        with eng.lock:
+            if self._stopped.is_set():
+                return None
+            ctx = eng.prepare(ev2)
         history = list(ctx["history"])
         if history and history[-1]["role"] == "user" and history[-1]["content"].endswith(ev2.text):
             history.pop()                         # prepare() 会把 ev2.text 当成"他说的话"补进去，这里不是
@@ -282,6 +332,8 @@ class BiliChat:
             note = f"## 你刚想去看《{title}》\n但{reason}，所以只知道标题。照实跟他说一声，一两句，别编内容。"
         msgs = [{"role": "system", "content": ctx["system"] + "\n\n" + note}] + history + [
             {"role": "user", "content": "[系统提示，不是他说的话] 现在由你接着发一条消息。"}]
+        if self._stopped.is_set():
+            return None
         try:
             out = (eng.llm.chat(msgs) or "").strip()
         except LLMError as ex:
@@ -291,9 +343,13 @@ class BiliChat:
         return out[:500] or None
 
     def _deliver(self, ev: Event, text: str) -> bool:
+        if self._stopped.is_set():
+            return False
         sender = getattr(self.engine, "qq_sender", None)
         if sender is None:
             log.info("QQ 没连接，看完的视频没法发出去")
+            return False
+        if self._stopped.is_set():
             return False
         try:
             ok = bool(sender(ev, text))
@@ -301,5 +357,7 @@ class BiliChat:
             log.warning("发送失败：%s", ex)
             return False
         if ok:
-            self.engine.commit_reply(ev, text, trust="known")     # 用了字幕：按公开内容的可信度存
+            with self.engine.lock:
+                if not self._stopped.is_set():
+                    self.engine.commit_reply(ev, text, trust="known")     # 用了字幕：按公开内容的可信度存
         return ok

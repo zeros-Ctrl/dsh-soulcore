@@ -1,9 +1,10 @@
 """记忆抽取（输入门的"语义"部分）：把一段对话提炼成可长期保存的条目，并给出重要性。"""
 from __future__ import annotations
-import re
+import re, json
 import time
 
 from .conflicts import CHANGE
+from .textutil import strip_source_prefix
 from .timeparse import parse_due_string, parse_followup, _DAY_REL, _WEEK
 
 KINDS = ("fact", "preference", "decision", "todo", "person", "self")
@@ -19,10 +20,16 @@ EXTRACT_SYS = """TASK:EXTRACT 你是记忆整理器，负责从对话中提炼�
                "project": "项目名（仅当 about=project）",
                "tags": ["可选标签"],
                "keywords": ["3~6 个日后可能用来问起这件事的其他说法：同义词、英文/缩写、口语、上位概念"],
-               "replaces": [编号...]（可选，见下）}]}
+               "replaces": [编号...]（可选，见下）,
+               "source_ids": [支持本条记忆的来源编号...],
+               "evidence_ids": [验证证据编号...],
+               "epistemic_state": "suggested|accepted|implemented|verified"}]}
 规则：
 - 寒暄、复读、无信息量的闲聊一律不要。宁缺毋滥，通常 0-5 条。
 - decision 要写清"决定了什么 + 为什么 + 否掉了什么"，importance ≥ 0.7。
+- 区分提议(suggested)、明确接受(accepted)、实际实施(implemented)、有验证证据(verified)。
+  助手说“建议/可以”不是已接受；说“改好了”不是测试通过。verified 必须引用[工具证据]中的通过记录。
+  source_ids 只能取[来源编号]，evidence_ids 只能取[工具证据]编号；没有依据就不要升级状态。
 - 用户明确说"记住/别忘了"的，importance ≥ 0.85。
 - preference/person 是关于对方这个人的（about=user）；self 只记录持续的自我认识或明确的长期承诺。
 - 临时情绪、气头上的绝对化说法、仅本次的语气请求不提炼成长久偏好或 self；例如“今天别开玩笑”只影响当前对话。
@@ -101,7 +108,7 @@ def heuristic_extract(transcript: str, now: float | None = None) -> list[dict]:
     now = now if now is not None else _time.time()
     out, seen = [], set()
     for line in transcript.splitlines():
-        line = line.strip()
+        line = strip_source_prefix(line)
         if not line or SELF_MARK in line.split(": ", 1)[0]:
             continue
         speaker, _, text = line.partition(": ")
@@ -242,7 +249,32 @@ def compact_turn(text: str, role: str = "user", limit: int | None = None) -> str
         i += 1
     text = "\n".join(out)
     limit = limit or {"assistant": 300, "user": 800}.get(role, 800)
-    return _truncate(text, limit)
+    return _salient_excerpt(text, limit)
+
+
+_SALIENT = re.compile(r"决定|采用|否决|不要|不能|必须|约束|因为|原因|失败|阻塞|验证|测试|"
+                      r"回滚|尚未|未完成|下一步|(?:decision|constraint|failed|passed|blocker|next step)", re.I)
+
+
+def _salient_excerpt(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    matches = list(_SALIENT.finditer(text))
+    if not matches:
+        return _truncate(text, limit)
+    # Preserve reasons and constraints in the middle, not just the message ends.
+    # This is an excerpt with an explicit omission marker; raw source remains intact.
+    radius = max(35, min(120, limit // 5))
+    spans = [(0, max(30, limit // 4)), (max(0, len(text) - max(30, limit // 5)), len(text))]
+    for match in matches[:8]:
+        spans.append((max(0, match.start() - radius), min(len(text), match.end() + radius)))
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    return "\n…[中间原文省略]…\n".join(text[start:end] for start, end in merged)
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -253,10 +285,28 @@ def _truncate(text: str, limit: int) -> str:
     return text[:head] + "…" + (text[-tail:] if tail > 0 else "")
 
 
-def format_transcript(turns, limits: dict | None = None) -> str:
+def format_transcript(turns, limits: dict | None = None, *, sources: bool = False) -> str:
     limits = limits or {}
-    return "\n".join(f"{(t.speaker or t.role)}{SELF_MARK if t.role == 'assistant' else ''}: "
-                     f"{compact_turn(t.content, t.role, limits.get(t.role))}" for t in turns)
+    lines = []
+    for t in turns:
+        source = f"[来源编号#{t.id}] " if sources and getattr(t, "id", 0) else ""
+        lines.append(f"{source}{(t.speaker or t.role)}{SELF_MARK if t.role == 'assistant' else ''}: "
+                     f"{compact_turn(t.content, t.role, limits.get(t.role))}")
+    return "\n".join(lines)
+
+
+def transcript_coverage(turns, limits: dict | None = None) -> list[dict]:
+    """Expose excerpt omissions without pretending the entire source was extracted."""
+    limits = limits or {}
+    out = []
+    for t in turns:
+        raw = t.content or ""
+        excerpt = compact_turn(raw, t.role, limits.get(t.role))
+        if raw != excerpt:
+            out.append({"source_id": getattr(t, "id", 0), "original_chars": len(raw),
+                        "excerpt_chars": len(excerpt), "code_folded": bool(_CODE_BLOCK.search(raw)),
+                        "excerpted": True})
+    return out
 
 
 def worth_extracting(turns) -> bool:
@@ -266,6 +316,11 @@ def worth_extracting(turns) -> bool:
     """
     for t in turns:
         if getattr(t, "role", "user") == "assistant":
+            # Project conclusions and failures often arrive in the assistant's reply.
+            if re.search(r"决定|方案|原因|因为|验证|测试.{0,12}(通过|失败)|失败原因|阻塞|回滚|"
+                         r"(?:test|build).{0,15}(?:passed|failed)|we (?:decided|implemented)",
+                         getattr(t, "content", "") or "", re.I):
+                return True
             continue
         text = (getattr(t, "content", "") or "").strip()
         if not text:
@@ -311,14 +366,15 @@ def extract(llm, turns, path: str, existing: list[dict] | None = None, persona_h
 
 
 def extract_full(llm, turns, path: str, existing: list[dict] | None = None,
-                 persona_hint: str = "", limits: dict | None = None, *, strict: bool = False) -> dict:
+                 persona_hint: str = "", limits: dict | None = None, *, strict: bool = False,
+                 evidence: list[dict] | None = None) -> dict:
     """提炼一批对话，返回 {"memories": [...], "persona_slips": [...]}。
 
     existing 里的编号是唯一的"可取代"白名单：LLM 只能填这里出现过的 id。
     strict=True 时让模型失败抛出，由调用方保留批次并重试。
     """
     existing = existing or []
-    text = format_transcript(turns, limits)
+    text = format_transcript(turns, limits, sources=True)
     if not text.strip():
         return {"memories": [], "persona_slips": []}
     # "明天/周五"要按说这句话的时间来算，不是按提炼的时间（提炼每 6 轮才跑一次）
@@ -332,6 +388,15 @@ def extract_full(llm, turns, path: str, existing: list[dict] | None = None,
         lines.append("[已有相关记忆]")
         for e in existing[:8]:
             lines.append(f"#{e.get('id')} [{e.get('kind', 'fact')}] {str(e.get('content', ''))[:120]}")
+    evidence = evidence or []
+    if evidence:
+        lines.append("[工具证据]")
+        for e in evidence[:12]:
+            content = str(e.get('content', ''))
+            excerpt = content if len(content) <= 800 else content[:350] + "…" + content[-450:]
+            lines.append(f"#{e['id']} {e.get('evidence_type', '')} "
+                         f"observed_at={e.get('created', 'unknown')} "
+                         f"{json.dumps(e.get('evidence', {}), ensure_ascii=False)} {excerpt}")
     lines += ["[对话]", text]
     try:
         res = llm.chat_json([{"role": "system", "content": EXTRACT_SYS},
@@ -340,12 +405,16 @@ def extract_full(llm, turns, path: str, existing: list[dict] | None = None,
             if strict:
                 raise ValueError("memory extraction did not return a JSON object")
             res = {}
+        if strict and not isinstance(res.get("memories"), list):
+            raise ValueError("memory extraction requires a memories array; missing or malformed output is retryable")
     except Exception:
         if strict:
             raise
         res = {"memories": heuristic_extract(text, ref)}
     mems = res.get("memories", [])
     ids = {int(e["id"]) for e in existing if isinstance(e, dict) and str(e.get("id", "")).lstrip("-").isdigit()}
+    source_ids = {int(t.id) for t in turns if getattr(t, "id", 0)}
+    evidence_ids = {int(e['id']) for e in evidence}
     clean = []
     for m in mems if isinstance(mems, list) else []:
         if not isinstance(m, dict) or not m.get("content"):
@@ -376,13 +445,22 @@ def extract_full(llm, turns, path: str, existing: list[dict] | None = None,
                 replaces.append(xi)
             if len(replaces) >= 3:
                 break
+        def refs(key, allowed):
+            values = m.get(key)
+            return sorted({int(x) for x in values if str(x).isdigit() and int(x) in allowed}) if isinstance(values, list) else []
+        state = str(m.get("epistemic_state") or "")
+        state = state if state in ("suggested", "accepted", "implemented", "verified") else ""
+        if kind == "decision" and not state:
+            state = "suggested"  # Unspecified model conclusions do not prove adoption.
         clean.append({"kind": kind, "content": str(m["content"])[:500],
                       "importance": max(0.0, min(1.0, imp)),
                       "about": m.get("about", "channel"), "project": str(m.get("project") or "").strip(),
                       "tags": [str(t) for t in (m.get("tags") or [])][:6],
                       "keywords": [str(t)[:20] for t in (m.get("keywords") or [])][:8],
                       "pinned": bool(m.get("pinned")) or (kind == "fact" and bool(IDENTITY.search(str(m["content"])))),
-                      "due_at": due, "replaces": replaces})
+                      "due_at": due, "replaces": replaces,
+                      "source_ids": refs("source_ids", source_ids),
+                      "evidence_ids": refs("evidence_ids", evidence_ids), "epistemic_state": state})
     slips = []
     for s in (res.get("persona_slips") or [])[:2] if isinstance(res.get("persona_slips"), list) else []:
         s = re.sub(r"\s+", " ", str(s)).strip()

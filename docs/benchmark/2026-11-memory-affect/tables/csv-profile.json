@@ -1,0 +1,206 @@
+[
+  {
+    "file": "budgets.csv",
+    "rows": 12,
+    "columns": [
+      "version",
+      "configured_budget",
+      "supported",
+      "n",
+      "answer_record_visible",
+      "estimated_tokens_mean",
+      "critical_complete_fraction"
+    ],
+    "null_counts": {
+      "version": 0,
+      "configured_budget": 0,
+      "supported": 0,
+      "n": 0,
+      "answer_record_visible": 0,
+      "estimated_tokens_mean": 0,
+      "critical_complete_fraction": 0
+    }
+  },
+  {
+    "file": "emotion.csv",
+    "rows": 140,
+    "columns": [
+      "version",
+      "seed",
+      "minute",
+      "mood",
+      "arousal",
+      "restart_mood_error"
+    ],
+    "null_counts": {
+      "version": 0,
+      "seed": 0,
+      "minute": 0,
+      "mood": 0,
+      "arousal": 70,
+      "restart_mood_error": 130
+    }
+  },
+  {
+    "file": "expression-policy.csv",
+    "rows": 42,
+    "columns": [
+      "version",
+      "mood",
+      "arousal",
+      "task",
+      "max_tokens",
+      "max_messages",
+      "sharing",
+      "initiative_multiplier"
+    ],
+    "null_counts": {
+      "version": 0,
+      "mood": 0,
+      "arousal": 0,
+      "task": 0,
+      "max_tokens": 0,
+      "max_messages": 0,
+      "sharing": 0,
+      "initiative_multiplier": 0
+    }
+  },
+  {
+    "file": "latency.csv",
+    "rows": 2040,
+    "columns": [
+      "version",
+      "path",
+      "sample",
+      "milliseconds"
+    ],
+    "null_counts": {
+      "version": 0,
+      "path": 0,
+      "sample": 0,
+      "milliseconds": 0
+    }
+  },
+  {
+    "file": "longmem.csv",
+    "rows": 10,
+    "columns": [
+      "version",
+      "seed",
+      "turns",
+      "ku_ok",
+      "ku_valid_fact_present",
+      "ku_new_visible",
+      "ku_stale_unlabeled",
+      "tr_ok",
+      "lr_ok",
+      "ctrl_ok",
+      "privacy_leaks",
+      "extract_calls",
+      "extract_in_chars",
+      "llm_calls_all",
+      "inject_chars_mean",
+      "inject_chars_phatic",
+      "latency_ms_mean"
+    ],
+    "null_counts": {
+      "version": 0,
+      "seed": 0,
+      "turns": 0,
+      "ku_ok": 0,
+      "ku_valid_fact_present": 0,
+      "ku_new_visible": 0,
+      "ku_stale_unlabeled": 0,
+      "tr_ok": 0,
+      "lr_ok": 0,
+      "ctrl_ok": 0,
+      "privacy_leaks": 0,
+      "extract_calls": 0,
+      "extract_in_chars": 0,
+      "llm_calls_all": 0,
+      "inject_chars_mean": 0,
+      "inject_chars_phatic": 0,
+      "latency_ms_mean": 0
+    }
+  },
+  {
+    "file": "preservation.csv",
+    "rows": 12,
+    "columns": [
+      "version",
+      "role",
+      "input_chars",
+      "stored_chars",
+      "exact_original",
+      "retention_ratio",
+      "middle_constraint_in_excerpt",
+      "excerpt_chars"
+    ],
+    "null_counts": {
+      "version": 0,
+      "role": 0,
+      "input_chars": 0,
+      "stored_chars": 0,
+      "exact_original": 0,
+      "retention_ratio": 0,
+      "middle_constraint_in_excerpt": 0,
+      "excerpt_chars": 0
+    }
+  },
+  {
+    "file": "probe-contexts.csv",
+    "rows": 220,
+    "columns": [
+      "version",
+      "seed",
+      "category",
+      "query",
+      "project",
+      "text"
+    ],
+    "null_counts": {
+      "version": 0,
+      "seed": 0,
+      "category": 0,
+      "query": 0,
+      "project": 0,
+      "text": 0
+    }
+  },
+  {
+    "file": "project-isolation.csv",
+    "rows": 40,
+    "columns": [
+      "version",
+      "repetition",
+      "project",
+      "own_visible",
+      "other_project_visible"
+    ],
+    "null_counts": {
+      "version": 0,
+      "repetition": 0,
+      "project": 0,
+      "own_visible": 0,
+      "other_project_visible": 0
+    }
+  },
+  {
+    "file": "retrieval.csv",
+    "rows": 21,
+    "columns": [
+      "version",
+      "category",
+      "n",
+      "recall_at_5",
+      "mrr"
+    ],
+    "null_counts": {
+      "version": 0,
+      "category": 0,
+      "n": 0,
+      "recall_at_5": 0,
+      "mrr": 0
+    }
+  }
+]

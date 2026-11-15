@@ -15,10 +15,11 @@ import logging
 import os
 import sys
 import time
+import uuid
 from urllib.parse import quote
 
 from . import __version__
-from .cc_hook import project_name
+from .cc_hook import project_name, resolve_project_event
 from .client import Backend, BackendUnavailable, resolve_home
 from .persona import _ago
 
@@ -42,7 +43,7 @@ TOOLS = [
                 "include_history": {"type": "boolean", "default": False,
                                     "description": "是否连已过时的旧说法一起搜（问\"以前\"时用）"},
                 "project": {"type": "string",
-                            "description": "项目名，默认取当前工作目录（有 .git 时用仓库根目录名）"},
+                            "description": "项目名或已注册 UUID；同名时使用当前项目身份或指定 UUID，默认当前工作目录"},
             },
             "required": ["query"],
         },
@@ -104,6 +105,9 @@ class McpServer:
         self.home = home or resolve_home()
         self.out = out or sys.stdout
         self.project = project or project_name(os.getcwd())
+        self.cwd = os.getcwd() if project is None else ""
+        self.session_id = "mcp-" + str(uuid.uuid4())
+        self._project_info = {}
         self.backend = Backend(home=self.home)
         self._ready = False
 
@@ -139,7 +143,35 @@ class McpServer:
         return {"platform": "local", "scene": "project", "channel_id": self.project,
                 "user_id": "owner", "user_name": "主人", "text": text,
                 "mentions_self": True, "ts": time.time(),
-                "raw": {"client": "mcp"}}
+                "cwd": self.cwd, "project_id": self._project_info.get("project_id", ""),
+                "session_id": self.session_id, "event_id": str(uuid.uuid4()),
+                "raw": {"client": "mcp", "session_id": self.session_id}}
+
+    def _resolve_project(self) -> dict:
+        # Model tools must not silently fall back to a shared basename if the
+        # identity endpoint is unavailable; hooks retain their optional fallback.
+        event = resolve_project_event(self.backend, self._event(), timeout=2.0, strict=True)
+        if event.get("project_id"):
+            self._project_info = event.get("raw", {}).get("project_identity", {})
+        return event
+
+    def _search_project(self, requested: str = "") -> dict:
+        current = self._resolve_project()
+        if not requested:
+            return current
+        requested = str(requested).strip()
+        info = current.get("raw", {}).get("project_identity", {})
+        if requested in (self.project, current.get("channel_id"), current.get("project_id"), info.get("name")):
+            if not current.get("project_id"):
+                raise ValueError("无法确认当前项目身份，请省略 project 或在目标目录接入后重试")
+            return current
+        try:
+            project_id = str(uuid.UUID(requested))
+        except (ValueError, TypeError, AttributeError):
+            project_id = ""
+        target = {**self._event(), "cwd": "", "channel_id": requested, "project_id": project_id,
+                  "raw": {"client": "mcp", "resolve_project_name": True}}
+        return resolve_project_event(self.backend, target, timeout=2.0, strict=True)
 
     def _fmt_items(self, items) -> str:
         if not items:
@@ -154,7 +186,10 @@ class McpServer:
                 ago = "以前"
             stale = "（已过时）" if it.get("invalid_at") else ""
             note = f"（注意：{it['stale_note']}）" if it.get("stale_note") else ""
-            lines.append(f"#{it.get('id')} [{it.get('kind', 'fact')}·{ago}] {stale}{it.get('content', '')}{note}")
+            state = {"suggested": "提议", "accepted": "已接受", "implemented": "已实施",
+                     "verified": "有验证证据"}.get(it.get("epistemic_state"), "")
+            label = f"{it.get('kind', 'fact')}·{ago}" + ("·" + state if state else "")
+            lines.append(f"#{it.get('id')} [{label}] {stale}{it.get('content', '')}{note}")
         return "\n".join(lines)
 
     def call_tool(self, name: str, args: dict) -> dict:
@@ -167,12 +202,14 @@ class McpServer:
                 if not q:
                     raise ValueError("query 不能为空")
                 k = max(1, min(int(args.get("k") or 8), 50))
-                project = str(args.get("project") or self.project)
+                event = self._search_project(args.get("project") or "")
+                project = str(event["channel_id"])
+                pid = str(event.get("project_id") or "")
                 extra = quote("core/people/owner,core/self", safe="")
                 hist = "1" if args.get("include_history") else "0"
                 items = self.backend.request(
                     "GET", f"/v1/memory/search?q={quote(q)}&path={quote('project/' + project)}"
-                           f"&extra={extra}&k={k}&history={hist}&touch=1") or []
+                           f"&project_id={quote(pid)}&extra={extra}&k={k}&history={hist}&touch=1") or []
                 return {"content": [{"type": "text", "text": self._fmt_items(items)}]}
             if name == "remember":
                 content = str(args.get("content") or "").strip()
@@ -196,7 +233,7 @@ class McpServer:
                 t = self.backend.request("GET", f"/v1/memory/timeline?limit={limit}") or {}
                 lines = ["最近记的："]
                 recent = t.get("recent") or []
-                lines += [f"- #{x['id']} [{x['kind']}] {x['content']}" for x in recent] or ["（还没有）"]
+                lines += self._fmt_items(recent).splitlines() if recent else ["（还没有）"]
                 sup = t.get("superseded") or []
                 if sup:
                     lines.append("")

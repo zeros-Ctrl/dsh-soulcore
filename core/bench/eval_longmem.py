@@ -190,12 +190,16 @@ def main() -> dict:
     inject = 0
     inject_n = 0
     lat: list[float] = []
+    probe_outputs = []
 
     def probe(cat: str, proj: str, q: str) -> str:
         nonlocal inject, inject_n
         ev = Event("local", "project", proj, "owner", "主人", q, mentions_self=True, ts=T[0])
         t0 = time.perf_counter()
-        text = eng.context_block(ev, include_stable=not SPLIT_STABLE)["text"]
+        block = eng.context_block(ev, include_stable=not SPLIT_STABLE)
+        text = block["text"]
+        probe_outputs.append({"cat": cat, "query": q, "project": proj, "text": text,
+                              "recalled_memories": block.get("memories", [])})
         lat.append((time.perf_counter() - t0) * 1000)
         inject += len(text)
         inject_n += 1
@@ -206,7 +210,8 @@ def main() -> dict:
         return key in text
 
     # KU
-    ku_ok = ku_new = ku_stale = 0
+    ku_ok = ku_new = ku_stale = ku_valid_fact = 0
+    knowledge_state = []
     for a, b, proj, old, new, q, key_new, key_old in KU:
         text = probe("KU", proj, q)
         new_ok = visible(text, key_new)
@@ -215,6 +220,13 @@ def main() -> dict:
         ku_ok += ok
         ku_new += new_ok
         ku_stale += bool(stale_lines)
+        rows = [dict(r) for r in eng.store.db.execute(
+            "SELECT id,path,kind,content,status,invalid_at FROM items "
+            "WHERE kind IN ('fact','decision') AND instr(content,?)>0", (key_new,))]
+        valid_rows = [r for r in rows if r["invalid_at"] is None and r["status"] != "deleted"]
+        ku_valid_fact += bool(valid_rows)
+        knowledge_state.append({"query": q, "new_value": key_new, "valid_fact_present": bool(valid_rows),
+                                "matching_records": rows})
         details.append({"cat": "KU", "q": q, "ok": ok, "text": text[:300]})
 
     # TR
@@ -271,6 +283,10 @@ def main() -> dict:
         T[0] += 30
 
     stats = eng.store.stats()
+    # Synthetic fixture evidence retained for diagnosing misses, never user data.
+    diagnostic_rows = [dict(r) for r in eng.store.db.execute(
+        "SELECT id,path,kind,content,status,invalid_at FROM items "
+        "WHERE content LIKE '%Cartographer%' OR content LIKE '%AMCL%' ORDER BY id")]
     eng.close()
     shutil.rmtree(tmp, ignore_errors=True)
     res = {
@@ -278,6 +294,8 @@ def main() -> dict:
         "ku_ok": round(ku_ok / len(KU), 4),
         "ku_new_visible": round(ku_new / len(KU), 4),
         "ku_stale_unlabeled": round(ku_stale / len(KU), 4),
+        "ku_valid_fact_present": round(ku_valid_fact / len(KU), 4),
+        "knowledge_state_diagnostics": knowledge_state,
         "tr_ok": round(tr_ok / len(tr_probes), 4),
         "lr_ok": round(lr_ok / (len(LR) + 1), 4),
         "ctrl_ok": round(ctrl_ok / len(CTRL), 4),
@@ -288,6 +306,8 @@ def main() -> dict:
         "latency_ms_mean": round(sum(lat) / len(lat), 2) if lat else 0.0,
         "memory_stats": stats,
         "details": details,
+        "probe_outputs": probe_outputs,
+        "diagnostic_localization_records": diagnostic_rows,
     }
     if SPLIT_STABLE:
         res["inject_chars_phatic_split"] = res["inject_chars_phatic"]

@@ -1,6 +1,7 @@
 """LLM 客户端：DeepSeek（OpenAI 兼容接口，仅用标准库）+ 离线 Mock（无 key 也能跑通整条管线）"""
 from __future__ import annotations
-import json, os, re, random, urllib.request, urllib.error
+import json, os, re, random, time, urllib.request, urllib.error
+from .usage import current_purpose, record_request, usage_scope
 
 
 class LLMError(Exception):
@@ -10,6 +11,8 @@ class LLMError(Exception):
 
 class DeepSeekLLM:
     def __init__(self, cfg: dict):
+        self.provider = cfg.get("provider", "deepseek")
+        self.usage_ledger = None
         self.base = cfg.get("base_url", "https://api.deepseek.com").rstrip("/")
         self.key = cfg.get("api_key") or os.environ.get(cfg.get("api_key_env", "DEEPSEEK_API_KEY"), "")
         self.model = cfg.get("model", "deepseek-chat")
@@ -19,6 +22,10 @@ class DeepSeekLLM:
         self.timeout = cfg.get("timeout", 60)
         if not self.key:
             raise LLMError("没有找到 DeepSeek API key（配置 llm.api_key 或环境变量 DEEPSEEK_API_KEY），可用 --mock 离线运行")
+
+    def bind_usage(self, ledger):
+        self.usage_ledger = ledger
+        return self
 
     def _req(self, method, path, body=None):
         data = json.dumps(body).encode() if body is not None else None
@@ -38,11 +45,26 @@ class DeepSeekLLM:
                 "max_tokens": max_tokens or self.max_tokens}
         if json_mode:
             body["response_format"] = {"type": "json_object"}
-        r = self._req("POST", "/chat/completions", body)
-        return r["choices"][0]["message"]["content"] or ""
+        started, response, success, failure = time.perf_counter(), None, False, None
+        try:
+            response = self._req("POST", "/chat/completions", body)
+            reply = response["choices"][0]["message"]["content"] or ""
+            success = True
+            return reply
+        except Exception as ex:
+            failure = ex
+            raise
+        finally:
+            record_request(self.usage_ledger, provider=self.provider, model=body["model"],
+                           usage=response.get("usage") if isinstance(response, dict) else None,
+                           success=success, elapsed_ms=(time.perf_counter()-started)*1000,
+                           status_code=getattr(failure, "status", None),
+                           error_type=type(failure).__name__ if failure else "")
 
     def chat_json(self, messages, **kw) -> dict:
-        txt = self.chat(messages, json_mode=True, temperature=0.2, model=self.extract_model, max_tokens=1200, **kw)
+        options = {"json_mode": True, "temperature": 0.2, "model": self.extract_model, "max_tokens": 1200, **kw}
+        with usage_scope(current_purpose("structured")):
+            txt = self.chat(messages, **options)
         return parse_json(txt)
 
     def balance(self) -> dict | None:
@@ -73,6 +95,11 @@ class MockLLM:
     def __init__(self, cfg: dict | None = None, seed: int = 0):
         self.rng = random.Random(seed)
         self.balance_value = 50.0
+
+    def bind_usage(self, ledger):
+        # Offline simulation has no provider-reported billable tokens.
+        self.usage_ledger = ledger
+        return self
 
     def chat(self, messages, **kw) -> str:
         sys = messages[0]["content"] if messages else ""

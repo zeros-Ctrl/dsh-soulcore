@@ -4,6 +4,10 @@
 
 核心只用 Python 标准库。人格和记忆保存在本机；DSH 的回复使用你在 DSH 选择的模型，QQ 回复使用插件里配置的 DeepSeek。
 
+用量账本、带来源的记忆、项目身份兼容、提炼预算和情绪行为设置见 [可靠记忆与情绪行为](docs/memory-affect-improvements.md)。
+
+[人格与记忆实测](docs/benchmark/2026-11-memory-affect/README.md)包含 SurfCore 组件比较、五组 200 天模拟、预算与情绪曲线及 CSV。画像不变时可少调用；完整模拟中提炼和注入输入增加，尚未证明整体费用下降。
+
 ## 安装到 DSH
 
 仓库公开后，可以直接安装：

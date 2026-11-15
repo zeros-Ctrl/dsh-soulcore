@@ -36,6 +36,17 @@ def _unescape(s: str) -> str:
     return s.replace("&#91;", "[").replace("&#93;", "]").replace("&#44;", ",").replace("&amp;", "&")
 
 
+def split_reply(text: str, max_messages: int = 1) -> list[str]:
+    """Split only natural paragraph boundaries, preserving structured answers."""
+    limit = min(3, max(1, int(max_messages)))
+    if not text:
+        return []
+    if limit == 1 or re.search(r"```|~~~|(?m:^\s*(?:[-*+]\s|\d+[.)、]\s|>|#{1,6}\s|\|))", text):
+        return [text]
+    parts = re.split(r"\n[ \t]*\n+", text.strip(), maxsplit=limit - 1)
+    return [part for part in parts if part.strip()]
+
+
 class OneBotAdapter:
     def __init__(self, engine, cfg: dict, api_fn=None):
         """api_fn：发送消息的通道。None 时走 HTTP（api_base），传函数时走别的传输（例如 WebSocket）。"""
@@ -124,8 +135,12 @@ class OneBotAdapter:
             try:
                 out = self.engine.handle(ev, reply=reply, record_reply=False)
                 if out:
-                    if self.send(ev, out):
-                        self.engine.commit_reply(ev, out)
+                    policy_getter = getattr(self.engine, "reply_policy", None)
+                    policy = policy_getter(ev) if callable(policy_getter) else None
+                    maximum = getattr(policy, "max_messages", 1) if policy is not None else 1
+                    delivered = self.send_reply(ev, out, max_messages=maximum)
+                    if delivered:
+                        self.engine.commit_reply(ev, delivered)
                     else:
                         self.engine.discard_reply(ev)
             except Exception:
@@ -137,10 +152,40 @@ class OneBotAdapter:
             finally:
                 self.q.task_done()
 
+    def send_reply(self, ev: Event, text: str, max_messages: int = 1) -> str | None:
+        """Send a normal reply once, returning only successfully delivered text.
+
+        Each part uses the existing limiter, typing delay and delivery guard.
+        Additional bubbles wait at most six seconds for the limiter.
+        A failed part ends delivery; a successful prefix is retained in memory.
+        send() remains the single-payload interface used by initiative/Bili.
+        """
+        delivered = []
+        parts = split_reply(text, max_messages)
+        for part in parts:
+            try:
+                # acquire() already waits for the remaining minimum interval.
+                # Keep the first payload compatible; later bubbles must not
+                # queue behind a long interval or exhausted minute budget.
+                sent = self.send(ev, part) if not delivered else self._send(ev, part, max_wait=6.0)
+                if not sent:
+                    break
+            except Exception:
+                log.exception("QQ 分条回复发送失败，保留已经投递的部分")
+                break
+            delivered.append(part)
+        if not delivered:
+            return None
+        return delivered[0] if len(parts) == 1 else "\n\n".join(delivered)
+
     def send(self, ev: Event, text: str) -> bool:
+        return self._send(ev, text)
+
+    def _send(self, ev: Event, text: str, max_wait: float | None = None) -> bool:
         rt = ev.reply_target
         key = f"{rt['type']}:{rt.get('group_id') or rt.get('user_id')}"
-        if not self.limiter.acquire(key):
+        allowed = self.limiter.acquire(key) if max_wait is None else self.limiter.acquire(key, max_wait=max_wait)
+        if not allowed:
             log.warning("触发限流，放弃回复 %s", key)
             return False
         if self.cfg.get("typing_delay", True):

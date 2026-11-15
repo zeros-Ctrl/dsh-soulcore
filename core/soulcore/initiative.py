@@ -37,6 +37,7 @@ from dataclasses import dataclass, asdict
 from .events import Event
 from .extractor import is_question
 from .llm import LLMError
+from .behavior import expression_profile
 
 log = logging.getLogger("soulcore.initiative")
 
@@ -247,10 +248,22 @@ class Initiative:
 
         # 分享：心情特别好
         mood = eng.emo.mood
-        if mood >= 0.8:
+        profile = expression_profile(mood, getattr(eng.emo, "arousal", 0.35), eng.cfg.get("behavior"))
+        if mood >= 0.74:
             ref = f"share:{today}"
             if ref not in done:
-                out.append(Thought("share", min(0.8, 0.4 + (mood - 0.8) * 2), "你今天心情特别好，想和他说说话", ref))
+                # 分享材料来自真实记忆；缺材料时只延续当前话题，不编造刚做过的事。
+                with eng.store.lock:
+                    rows = eng.store.db.execute(
+                        "SELECT id,content FROM items WHERE path='core/self' AND kind IN ('fact','self') "
+                        "AND status='hot' AND invalid_at IS NULL AND trust='owner' "
+                        "AND audience IN ('public','owner') ORDER BY created DESC LIMIT 8").fetchall()
+                material = next((r for r in rows if f"share:item:{r['id']}" not in done), None)
+                reason = "你今天心情不错，想就当前话题和他多聊一点"
+                if material:
+                    ref = f"share:item:{material['id']}"
+                    reason = f"你实际记得：{material['content'][:180]}。想和他分享这个话题，不要编造额外经历"
+                out.append(Thought("share", min(0.85, 0.35 + 0.65 * profile.sharing), reason, ref))
 
         # 想你：很孤单，又没别的话题
         L = eng.emo.L
@@ -297,6 +310,8 @@ class Initiative:
         lam *= 0.5 + float(rel.get("affinity", 0.5))
         lam *= hour_curve(self._now())
         lam *= 0.5 ** int(st["unanswered"])
+        lam *= expression_profile(eng.emo.mood, getattr(eng.emo, "arousal", 0.35),
+                                  eng.cfg.get("behavior")).initiative_multiplier
         return 1 - math.exp(-lam * max(0.0, dt_min))
 
     def _blockers(self, st: dict, now: float) -> str:
@@ -445,7 +460,11 @@ class Initiative:
         system = ctx["system"] + "\n\n" + COMPOSE_RULES.format(owner=owner_name, reason=th.reason)
         msgs = [{"role": "system", "content": system}] + history + [
             {"role": "user", "content": "[系统提示，不是他说的话] 现在由你主动发一条消息给他。"}]
-        out = (eng.llm.chat(msgs) or "").strip()
+        behavior_cfg = {"base_max_tokens": int((eng.cfg.get("llm") or {}).get("max_tokens", 400)),
+                        **(eng.cfg.get("behavior") or {})}
+        profile = expression_profile(eng.emo.mood, getattr(eng.emo, "arousal", 0.35), behavior_cfg)
+        msgs[0]["content"] += "\n" + profile.prompt
+        out = (eng.llm.chat(msgs, max_tokens=profile.max_tokens) or "").strip()
         out = re.sub(rf"^{re.escape(eng.name)}[:：]\s*", "", out).strip().strip('"“”')
         if not out or out.upper().startswith("SKIP"):
             return None

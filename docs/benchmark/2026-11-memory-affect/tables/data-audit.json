@@ -1,0 +1,37 @@
+{
+  "complete": true,
+  "seeds": [
+    42,
+    73,
+    101,
+    211,
+    307
+  ],
+  "longmem_runs": 10,
+  "longmem_turns": 16464,
+  "retrieval_unique_questions": 102,
+  "emotion_rows": 140,
+  "budget_rows": 12,
+  "isolation_rows": 40,
+  "excluded_rows": 0,
+  "input_data_sha256": {
+    "after-components-shared-fixture.json": "872135350256fa2319e997f7f7eb5d2e9e0953cc5511fbebb6fcbf9dad34d0e2",
+    "after-components-surfcore.json": "922cd79dcf2beccdb765a4b27ec02923c8d9e17391b7d71830e4b7526104c6c6",
+    "after-components.json": "0fbd58c3b3325600a977a51c68e3b1271e1aa0cb7182c54c0fdaaedc38de89d2",
+    "after-longmem-101.json": "aab9abc9d28fd8ed76834e065620d36992d671b76565800aebfcfa1a49f5b893",
+    "after-longmem-211.json": "75e2da5228cc0839021932efafa63e30851dc4a85eda5e361ddd8b0ffc6caf67",
+    "after-longmem-307.json": "de4d04f63ea2feeb06e1db89a51749d902db0dc2aae73f157eb9f67f1b61925c",
+    "after-longmem-42.json": "c14bbf765bf092107f79dd57f09bd64466ad77ae7254a9daf9e41073a008a9c6",
+    "after-longmem-73.json": "6db64484399afa0b666a4c012939ed67cfe30c07259b5689b09ec22e2f75698b",
+    "after-retrieval.json": "698b3a81a387b07f9a7596c31952d44c060a5900a07eef324502fd6e20e3340a",
+    "before-components.json": "ef24ca4fb5e3998f31adc2a04338a17eb22bf6e99f7e6441d96d9a375b9de88f",
+    "before-longmem-101.json": "837f29cbb69eab2689f9b14f1b6aa94fdec340ca0cecb17bbc4e2d128536c694",
+    "before-longmem-211.json": "3d4f0566306539545a30bcb61de1f7ca58faa1da1f47ce94ad2073ce798cd0f0",
+    "before-longmem-307.json": "0139f884a84a00f6f055c30f5768cda73898ef8ff2dafcfbb4a42fb21a478250",
+    "before-longmem-42.json": "94c83750369febe0fbc92dad6e14432297dcc534e96a2315ead6a589b6169c6f",
+    "before-longmem-73.json": "f23ab54b894c529cbcee46ea7702ea6e1f24da1a783e71ac42b8e2bf5b5fe0f2",
+    "before-retrieval.json": "698b3a81a387b07f9a7596c31952d44c060a5900a07eef324502fd6e20e3340a",
+    "run-manifest.json": "ce45a4cdaccbb2c28485e75a51ceca0d9c0f3c6617d28c9751ec4141be7e23f7"
+  },
+  "missingness": "Old arousal is intentionally unavailable; restart error exists only at restart checkpoint; budget=0 means disabled."
+}

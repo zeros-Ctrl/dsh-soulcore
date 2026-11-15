@@ -1,0 +1,2041 @@
+﻿version,path,sample,milliseconds
+before,SQLite full search,0,9.389100014232099
+before,SQLite full search,1,16.341800015652552
+before,SQLite full search,2,12.33879997744225
+before,SQLite full search,3,9.936899994499981
+before,SQLite full search,4,18.409600015729666
+before,SQLite full search,5,23.309800017159432
+before,SQLite full search,6,13.87509997584857
+before,SQLite full search,7,13.58940001227893
+before,SQLite full search,8,11.360200005583465
+before,SQLite full search,9,14.167299988912418
+before,SQLite full search,10,15.638999990187585
+before,SQLite full search,11,20.402800000738353
+before,SQLite full search,12,13.531199976569042
+before,SQLite full search,13,7.602700003189966
+before,SQLite full search,14,11.331899993820116
+before,SQLite full search,15,8.357099985005334
+before,SQLite full search,16,12.510500004282221
+before,SQLite full search,17,17.21749998978339
+before,SQLite full search,18,10.853899992071092
+before,SQLite full search,19,14.71240000682883
+before,SQLite full search,20,14.493399998173118
+before,SQLite full search,21,21.015700011048466
+before,SQLite full search,22,14.484600018477067
+before,SQLite full search,23,10.672800010070205
+before,SQLite full search,24,48.16209999262355
+before,SQLite full search,25,13.366300001507625
+before,SQLite full search,26,7.37100001424551
+before,SQLite full search,27,14.328999997815117
+before,SQLite full search,28,21.56889997422695
+before,SQLite full search,29,17.353100003674626
+before,SQLite full search,30,37.63439998147078
+before,SQLite full search,31,26.10419999109581
+before,SQLite full search,32,12.43649999378249
+before,SQLite full search,33,12.98030000180006
+before,SQLite full search,34,12.843600008636713
+before,SQLite full search,35,17.4710999999661
+before,SQLite full search,36,22.84039999358356
+before,SQLite full search,37,54.71709999255836
+before,SQLite full search,38,20.198300015181303
+before,SQLite full search,39,11.429799982579425
+before,SQLite full search,40,11.622199992416427
+before,SQLite full search,41,12.570899998536333
+before,SQLite full search,42,16.67230000020936
+before,SQLite full search,43,15.951400011545047
+before,SQLite full search,44,12.581299990415573
+before,SQLite full search,45,10.952299984637648
+before,SQLite full search,46,16.344500007107854
+before,SQLite full search,47,11.148599995067343
+before,SQLite full search,48,9.221700020134449
+before,SQLite full search,49,13.176699983887374
+before,SQLite full search,50,15.219499997328967
+before,SQLite full search,51,14.264700002968311
+before,SQLite full search,52,15.453500003786758
+before,SQLite full search,53,16.164600005140528
+before,SQLite full search,54,15.664400008972734
+before,SQLite full search,55,18.58969999011606
+before,SQLite full search,56,24.76189998560585
+before,SQLite full search,57,17.41480000782758
+before,SQLite full search,58,32.63960001640953
+before,SQLite full search,59,30.474499973934144
+before,SQLite full search,60,11.936700000660494
+before,SQLite full search,61,14.240300020901486
+before,SQLite full search,62,14.286300021922216
+before,SQLite full search,63,15.514800004893914
+before,SQLite full search,64,11.321700003463775
+before,SQLite full search,65,16.840700001921505
+before,SQLite full search,66,13.494999991962686
+before,SQLite full search,67,9.823600004892796
+before,SQLite full search,68,14.408299990464002
+before,SQLite full search,69,14.615099993534386
+before,SQLite full search,70,16.249100008280948
+before,SQLite full search,71,15.697999973781407
+before,SQLite full search,72,10.259700007736683
+before,SQLite full search,73,10.875599982682616
+before,SQLite full search,74,19.57330000004731
+before,SQLite full search,75,25.724599981913343
+before,SQLite full search,76,24.78430001065135
+before,SQLite full search,77,18.202300008852035
+before,SQLite full search,78,19.891600008122623
+before,SQLite full search,79,19.981399993412197
+before,SQLite full search,80,18.750300019746646
+before,SQLite full search,81,11.625800019828603
+before,SQLite full search,82,21.24780000303872
+before,SQLite full search,83,9.693200001493096
+before,SQLite full search,84,22.35579999978654
+before,SQLite full search,85,12.168699991889298
+before,SQLite full search,86,13.052399997832254
+before,SQLite full search,87,20.361199975013733
+before,SQLite full search,88,24.782299995422363
+before,SQLite full search,89,19.280899985460564
+before,SQLite full search,90,22.015599999576807
+before,SQLite full search,91,22.85390000906773
+before,SQLite full search,92,7.531900017056614
+before,SQLite full search,93,19.35580000281334
+before,SQLite full search,94,17.407000006642193
+before,SQLite full search,95,13.341000012587756
+before,SQLite full search,96,19.326399982674047
+before,SQLite full search,97,20.627399993827567
+before,SQLite full search,98,37.73839998757467
+before,SQLite full search,99,37.184599990723655
+before,SQLite full search,100,25.7119000016246
+before,SQLite full search,101,18.70059999055229
+before,SQLite full search,102,11.454099992988631
+before,SQLite full search,103,16.495899995788932
+before,SQLite full search,104,11.726500000804663
+before,SQLite full search,105,9.461900015594438
+before,SQLite full search,106,19.640700018499047
+before,SQLite full search,107,11.235600017243996
+before,SQLite full search,108,9.146799973677844
+before,SQLite full search,109,12.76410001446493
+before,SQLite full search,110,12.545000005047768
+before,SQLite full search,111,13.918399985413998
+before,SQLite full search,112,15.20570000866428
+before,SQLite full search,113,18.778600002406165
+before,SQLite full search,114,11.82620000327006
+before,SQLite full search,115,6.342899985611439
+before,SQLite full search,116,10.976199992001057
+before,SQLite full search,117,8.624799986137077
+before,SQLite full search,118,12.034700019285083
+before,SQLite full search,119,14.381800021510571
+before,SQLite full search,120,9.34750001761131
+before,SQLite full search,121,14.342800015583634
+before,SQLite full search,122,13.244599977042526
+before,SQLite full search,123,21.700400015106425
+before,SQLite full search,124,11.773800011724234
+before,SQLite full search,125,10.769399988930672
+before,SQLite full search,126,15.403600002173334
+before,SQLite full search,127,11.475199979031458
+before,SQLite full search,128,8.0022000183817
+before,SQLite full search,129,14.294699998572469
+before,SQLite full search,130,17.50069999252446
+before,SQLite full search,131,14.087599993217736
+before,SQLite full search,132,19.7512999875471
+before,SQLite full search,133,16.840500000398606
+before,SQLite full search,134,12.375599995721132
+before,SQLite full search,135,12.50330000766553
+before,SQLite full search,136,14.287600002717227
+before,SQLite full search,137,15.371199988294393
+before,SQLite full search,138,19.320499995956197
+before,SQLite full search,139,18.61329999519512
+before,SQLite full search,140,16.341299982741475
+before,SQLite full search,141,10.491900000488386
+before,SQLite full search,142,11.050100001739338
+before,SQLite full search,143,10.582899994915351
+before,SQLite full search,144,15.409799991175532
+before,SQLite full search,145,14.819899981375784
+before,SQLite full search,146,12.401999993016943
+before,SQLite full search,147,10.569000005489215
+before,SQLite full search,148,12.959799991222098
+before,SQLite full search,149,12.592600018251687
+before,SQLite full search,150,9.921199991367757
+before,SQLite full search,151,11.776100000133738
+before,SQLite full search,152,15.172400017036125
+before,SQLite full search,153,13.096599985146895
+before,SQLite full search,154,13.897600001655519
+before,SQLite full search,155,13.3048000279814
+before,SQLite full search,156,9.835400007432327
+before,SQLite full search,157,17.3124999855645
+before,SQLite full search,158,18.25190000818111
+before,SQLite full search,159,16.99100001133047
+before,SQLite full search,160,13.79079997423105
+before,SQLite full search,161,18.513000017264858
+before,SQLite full search,162,7.5348000100348145
+before,SQLite full search,163,15.19390000612475
+before,SQLite full search,164,13.663100020494312
+before,SQLite full search,165,12.059500004397705
+before,SQLite full search,166,11.675399990053847
+before,SQLite full search,167,16.74190000630915
+before,SQLite full search,168,12.955900019733235
+before,SQLite full search,169,9.7832000174094
+before,SQLite full search,170,18.82550001027994
+before,SQLite full search,171,15.764899988425896
+before,SQLite full search,172,15.24280000012368
+before,SQLite full search,173,13.07670000824146
+before,SQLite full search,174,9.981999988667667
+before,SQLite full search,175,10.491599998204038
+before,SQLite full search,176,19.662999984575436
+before,SQLite full search,177,18.547599989688024
+before,SQLite full search,178,20.400699984747916
+before,SQLite full search,179,17.412300017895177
+before,SQLite full search,180,18.587400001706555
+before,SQLite full search,181,19.659099983982742
+before,SQLite full search,182,15.675000002374873
+before,SQLite full search,183,11.418200010666624
+before,SQLite full search,184,18.14820000436157
+before,SQLite full search,185,9.57550000748597
+before,SQLite full search,186,21.5232000045944
+before,SQLite full search,187,8.958299993537366
+before,SQLite full search,188,13.113099994370714
+before,SQLite full search,189,16.30639997893013
+before,SQLite full search,190,22.41350000258535
+before,SQLite full search,191,19.065800006501377
+before,SQLite full search,192,20.924200012814254
+before,SQLite full search,193,22.249699977692217
+before,SQLite full search,194,7.628199993632734
+before,SQLite full search,195,18.452799995429814
+before,SQLite full search,196,17.671400011749938
+before,SQLite full search,197,13.448800018522888
+before,SQLite full search,198,16.857200011145324
+before,SQLite full search,199,16.555099980905652
+before,SQLite full search,200,17.074500006856397
+before,SQLite full search,201,30.91649999259971
+before,SQLite full search,202,24.826399981975555
+before,SQLite full search,203,19.405099999858066
+before,SQLite full search,204,10.104999993927777
+before,SQLite full search,205,15.093800000613555
+before,SQLite full search,206,11.75359997432679
+before,SQLite full search,207,8.229400002164766
+before,SQLite full search,208,21.418899996206164
+before,SQLite full search,209,12.684999994235113
+before,SQLite full search,210,10.454299976117909
+before,SQLite full search,211,19.630700000561774
+before,SQLite full search,212,15.169500024057925
+before,SQLite full search,213,16.88010001089424
+before,SQLite full search,214,13.866699999198318
+before,SQLite full search,215,18.46380002098158
+before,SQLite full search,216,12.306799995712936
+before,SQLite full search,217,6.526300014229491
+before,SQLite full search,218,10.942699998850003
+before,SQLite full search,219,9.006200009025633
+before,SQLite full search,220,11.220399988815188
+before,SQLite full search,221,14.380199980223551
+before,SQLite full search,222,9.483200003160164
+before,SQLite full search,223,11.825199995655566
+before,SQLite full search,224,12.489599990658462
+before,SQLite full search,225,21.098400000482798
+before,SQLite full search,226,14.743100007763132
+before,SQLite full search,227,11.466399999335408
+before,SQLite full search,228,17.424000019673258
+before,SQLite full search,229,10.752700007287785
+before,SQLite full search,230,7.533099997090176
+before,SQLite full search,231,13.842199987266213
+before,SQLite full search,232,18.44899999559857
+before,SQLite full search,233,13.733599975239486
+before,SQLite full search,234,17.544900008942932
+before,SQLite full search,235,16.891299979761243
+before,SQLite full search,236,15.945399994961917
+before,SQLite full search,237,12.290199985727668
+before,SQLite full search,238,12.855100008891895
+before,SQLite full search,239,15.243699977872893
+before,SQLite full search,240,21.523700008401647
+before,SQLite full search,241,19.540200009942055
+before,SQLite full search,242,17.270599986659363
+before,SQLite full search,243,10.062299988931045
+before,SQLite full search,244,11.847999994643033
+before,SQLite full search,245,11.422800016589463
+before,SQLite full search,246,15.560700005153194
+before,SQLite full search,247,14.508399995975196
+before,SQLite full search,248,11.668299994198605
+before,SQLite full search,249,10.513999994145706
+before,SQLite full search,250,13.250699994387105
+before,SQLite full search,251,11.756799998693168
+before,SQLite full search,252,7.887100015068427
+before,SQLite full search,253,11.682099982863292
+before,SQLite full search,254,15.262200002325699
+before,SQLite full search,255,13.910299981944263
+before,SQLite full search,256,14.110599993728101
+before,SQLite full search,257,14.68429999658838
+before,SQLite full search,258,9.726899996167049
+before,SQLite full search,259,16.64860002347268
+before,SQLite full search,260,18.961099995067343
+before,SQLite full search,261,14.734399999724701
+before,SQLite full search,262,14.430999988690019
+before,SQLite full search,263,18.221199978142977
+before,SQLite full search,264,7.952000014483929
+before,SQLite full search,265,11.935000016819686
+before,SQLite full search,266,12.5877000100445
+before,SQLite full search,267,11.590999987674877
+before,SQLite full search,268,10.66160001209937
+before,SQLite full search,269,17.34670001314953
+before,SQLite full search,270,14.801000012084842
+before,SQLite full search,271,9.922799974447116
+before,SQLite full search,272,13.216899998951703
+before,SQLite full search,273,13.849399983882904
+before,SQLite full search,274,14.48119999258779
+before,SQLite full search,275,16.029899998102337
+before,SQLite full search,276,13.145800010534003
+before,SQLite full search,277,13.331099995411932
+before,SQLite full search,278,18.344300013268366
+before,SQLite full search,279,19.53940000385046
+before,SQLite full search,280,19.655799987958744
+before,SQLite full search,281,19.14059999398887
+before,SQLite full search,282,22.642199997790158
+before,SQLite full search,283,19.91699999780394
+before,SQLite full search,284,15.886700013652444
+before,SQLite full search,285,11.91650002147071
+before,SQLite full search,286,18.35710002342239
+before,SQLite full search,287,10.588000004645437
+before,SQLite full search,288,21.201199997449294
+before,SQLite full search,289,8.926399983465672
+before,SQLite full search,290,12.314499996136874
+before,SQLite full search,291,16.925600008107722
+before,SQLite full search,292,21.464600024046376
+before,SQLite full search,293,19.29920000839047
+before,SQLite full search,294,22.80360000440851
+before,SQLite full search,295,24.18269999907352
+before,SQLite full search,296,7.285600004252046
+before,SQLite full search,297,18.300100025953725
+before,SQLite full search,298,17.558999999891967
+before,SQLite full search,299,13.79530000849627
+before,SQLite full search,300,16.655600018566474
+before,SQLite full search,301,16.383999987738207
+before,SQLite full search,302,13.300099992193282
+before,SQLite full search,303,32.372799993027
+before,SQLite full search,304,24.582100013503805
+before,SQLite full search,305,20.103099988773465
+before,SQLite full search,306,8.795100002316758
+before,SQLite full search,307,17.78200000990182
+before,SQLite full search,308,13.899400015361607
+before,SQLite full search,309,9.782699984498322
+before,SQLite full search,310,18.978200008859858
+before,SQLite full search,311,11.467800009995699
+before,SQLite full search,312,10.821200005011633
+before,SQLite full search,313,13.363400008529425
+before,SQLite full search,314,10.929499985650182
+before,SQLite full search,315,14.953500009141862
+before,SQLite full search,316,13.984299992443994
+before,SQLite full search,317,21.33529999991879
+before,SQLite full search,318,12.399800005368888
+before,SQLite full search,319,7.8708999790251255
+before,SQLite full search,320,13.09449999826029
+before,SQLite full search,321,8.472899993648753
+before,SQLite full search,322,11.670699983369559
+before,SQLite full search,323,14.646600000560284
+before,SQLite full search,324,9.173300000838935
+before,SQLite full search,325,12.026699987472966
+before,SQLite full search,326,12.445300002582371
+before,SQLite full search,327,21.048400027211756
+before,SQLite full search,328,12.188900000182912
+before,SQLite full search,329,9.668399987276644
+before,SQLite full search,330,15.740800008643419
+before,SQLite full search,331,11.518399987835437
+before,SQLite full search,332,7.412299979478121
+before,SQLite full search,333,14.476100011961535
+before,SQLite full search,334,20.48639999702573
+before,SQLite full search,335,15.668600011849776
+before,SQLite full search,336,18.13019998371601
+before,SQLite full search,337,19.864400004735216
+before,SQLite full search,338,11.92089999676682
+before,SQLite full search,339,12.524300022050738
+before,SQLite full search,340,13.69160000467673
+before,SQLite full search,341,18.07709998684004
+before,SQLite full search,342,20.104600000195205
+before,SQLite full search,343,18.15099999657832
+before,SQLite full search,344,18.387200019787997
+before,SQLite full search,345,10.169600020162761
+before,SQLite full search,346,11.776699975598603
+before,SQLite full search,347,11.305399995762855
+before,SQLite full search,348,15.257199993357062
+before,SQLite full search,349,15.476000000489876
+before,SQLite full search,350,10.923299996647984
+before,SQLite full search,351,10.451599984662607
+before,SQLite full search,352,12.543899996671826
+before,SQLite full search,353,11.392199987312779
+before,SQLite full search,354,9.012199996504933
+before,SQLite full search,355,11.582699982682243
+before,SQLite full search,356,15.083300007972866
+before,SQLite full search,357,13.540799991460517
+before,SQLite full search,358,12.463599996408448
+before,SQLite full search,359,14.105300011578947
+before,SQLite full search,360,11.582000006455928
+before,SQLite full search,361,22.141599998576567
+before,SQLite full search,362,18.4607999981381
+before,SQLite full search,363,16.533699992578477
+before,SQLite full search,364,14.42329998826608
+before,SQLite full search,365,18.1291000044439
+before,SQLite full search,366,8.432100003119558
+before,SQLite full search,367,13.947200000984594
+before,SQLite full search,368,14.447299996390939
+before,SQLite full search,369,12.825799989514053
+before,SQLite full search,370,10.924100002739578
+before,SQLite full search,371,16.557399998418987
+before,SQLite full search,372,12.931000004755333
+before,SQLite full search,373,12.06480001565069
+before,SQLite full search,374,14.414400007808581
+before,SQLite full search,375,16.668800002662465
+before,SQLite full search,376,16.849300009198487
+before,SQLite full search,377,13.758399989455938
+before,SQLite full search,378,10.75799998943694
+before,SQLite full search,379,11.723599978722632
+before,SQLite full search,380,20.089900004677474
+before,SQLite full search,381,22.363800002494827
+before,SQLite full search,382,22.75130001362413
+before,SQLite full search,383,19.63850000174716
+before,SQLite full search,384,22.020100004738197
+before,SQLite full search,385,24.41410001483746
+before,SQLite full search,386,18.935400003101677
+before,SQLite full search,387,12.51810000394471
+before,SQLite full search,388,21.16940001724288
+before,SQLite full search,389,11.004699976183474
+before,SQLite full search,390,24.210000003222376
+before,SQLite full search,391,11.181300011230633
+before,SQLite full search,392,14.958999992813915
+before,SQLite full search,393,20.534200011752546
+before,SQLite full search,394,21.129700005985796
+before,SQLite full search,395,20.18550000502728
+before,SQLite full search,396,22.030699998140335
+before,SQLite full search,397,23.373300005914643
+before,SQLite full search,398,8.024800015846267
+before,SQLite full search,399,19.285699992906302
+before,SQLite full search,400,17.069900000933558
+before,SQLite full search,401,12.8885000012815
+before,SQLite full search,402,17.225499992491677
+before,SQLite full search,403,17.205299984198064
+before,SQLite full search,404,13.931199995568022
+before,SQLite full search,405,28.717099979985505
+before,SQLite full search,406,24.551999988034368
+before,SQLite full search,407,20.950800011632964
+before,SQLite full search,408,9.253099997295067
+before,SQLite full search,409,15.362300007836893
+before,SQLite full search,410,11.142699979245663
+before,SQLite full search,411,10.253700020257384
+before,SQLite full search,412,18.79400000325404
+before,SQLite full search,413,10.338399995816872
+before,SQLite full search,414,8.614399994257838
+before,SQLite full search,415,13.454100000672042
+before,SQLite full search,416,11.139700014609843
+before,SQLite full search,417,14.403199980733916
+before,SQLite full search,418,14.185799984261394
+before,SQLite full search,419,19.947499997215346
+before,SQLite full search,420,12.757099990267307
+before,SQLite full search,421,7.794600009219721
+before,SQLite full search,422,12.36710001830943
+before,SQLite full search,423,9.325000020908192
+before,SQLite full search,424,10.865000018384308
+before,SQLite full search,425,14.453899988438934
+before,SQLite full search,426,8.713799994438887
+before,SQLite full search,427,14.941000001272187
+before,SQLite full search,428,12.52410002052784
+before,SQLite full search,429,20.30370000284165
+before,SQLite full search,430,12.370100012049079
+before,SQLite full search,431,10.699800011934713
+before,SQLite full search,432,15.88730001822114
+before,SQLite full search,433,12.778999982401729
+before,SQLite full search,434,8.095700002741069
+before,SQLite full search,435,15.170600003330037
+before,SQLite full search,436,19.46680000401102
+before,SQLite full search,437,15.44429999194108
+before,SQLite full search,438,17.52120000310242
+before,SQLite full search,439,18.143199995392933
+before,SQLite full search,440,14.022399991517887
+before,SQLite full search,441,12.146799999754876
+before,SQLite full search,442,11.588599998503923
+before,SQLite full search,443,13.62940002582036
+before,SQLite full search,444,19.863599998643622
+before,SQLite full search,445,18.59540000441484
+before,SQLite full search,446,16.852299973834306
+before,SQLite full search,447,10.327700001653284
+before,SQLite full search,448,11.024899984477088
+before,SQLite full search,449,11.075799993705004
+before,SQLite full search,450,17.534000013256446
+before,SQLite full search,451,14.642199996160343
+before,SQLite full search,452,11.502300010761246
+before,SQLite full search,453,11.054000002332032
+before,SQLite full search,454,12.396100006299093
+before,SQLite full search,455,11.142299976199865
+before,SQLite full search,456,8.154100010870025
+before,SQLite full search,457,11.303799983579665
+before,SQLite full search,458,15.244700014591217
+before,SQLite full search,459,12.648599979002029
+before,SQLite full search,460,12.34760001534596
+before,SQLite full search,461,13.036200019996613
+before,SQLite full search,462,9.501199994701892
+before,SQLite full search,463,15.97169999149628
+before,SQLite full search,464,21.282100002281368
+before,SQLite full search,465,17.45939999818802
+before,SQLite full search,466,14.071200013859197
+before,SQLite full search,467,17.323299980489537
+before,SQLite full search,468,8.136399992508814
+before,SQLite full search,469,13.50490000913851
+before,SQLite full search,470,12.912299978779629
+before,SQLite full search,471,12.299099995288998
+before,SQLite full search,472,11.319099983666092
+before,SQLite full search,473,16.4130000048317
+before,SQLite full search,474,12.499699980253354
+before,SQLite full search,475,9.324999991804361
+before,SQLite full search,476,14.178400015225634
+before,SQLite full search,477,14.54190001823008
+before,SQLite full search,478,16.91270002629608
+before,SQLite full search,479,13.71980001567863
+before,SQLite full search,480,10.378300008596852
+before,SQLite full search,481,11.417999980039895
+before,SQLite full search,482,18.845599988708273
+before,SQLite full search,483,20.70260001346469
+before,SQLite full search,484,21.195500012254342
+before,SQLite full search,485,17.258900013985112
+before,SQLite full search,486,19.114499998977408
+before,SQLite full search,487,17.790400015655905
+before,SQLite full search,488,16.013799991924316
+before,SQLite full search,489,11.561400024220347
+before,SQLite full search,490,18.501800019294024
+before,SQLite full search,491,9.7861000103876
+before,SQLite full search,492,21.677699987776577
+before,SQLite full search,493,10.37870001164265
+before,SQLite full search,494,11.921299999812618
+before,SQLite full search,495,17.043400002876297
+before,SQLite full search,496,20.660399983171374
+before,SQLite full search,497,19.230300007620826
+before,SQLite full search,498,20.36479997332208
+before,SQLite full search,499,21.996900002704933
+before,SQLite full search,500,7.837299985112622
+before,SQLite full search,501,17.85189998918213
+before,SQLite full search,502,19.296100013889372
+before,SQLite full search,503,14.335500018205494
+before,SQLite full search,504,17.726599995512515
+before,SQLite full search,505,16.8134999985341
+before,SQLite full search,506,13.961899996502325
+before,SQLite full search,507,27.271099999779835
+before,SQLite full search,508,26.64500000537373
+before,SQLite full search,509,19.168200000422075
+after,SQLite full search,0,9.081900003366172
+after,SQLite full search,1,16.06659998651594
+after,SQLite full search,2,12.095599988242611
+after,SQLite full search,3,24.096200009807944
+after,SQLite full search,4,24.87480000127107
+after,SQLite full search,5,10.266400000546128
+after,SQLite full search,6,9.538899990729988
+after,SQLite full search,7,12.779499986208975
+after,SQLite full search,8,10.990799986757338
+after,SQLite full search,9,16.818400006741285
+after,SQLite full search,10,14.267399994423613
+after,SQLite full search,11,23.817399982362986
+after,SQLite full search,12,13.212699996074662
+after,SQLite full search,13,7.8397000033874065
+after,SQLite full search,14,11.370899999747053
+after,SQLite full search,15,10.119699989445508
+after,SQLite full search,16,12.868799996795133
+after,SQLite full search,17,18.80029999301769
+after,SQLite full search,18,15.109600004507229
+after,SQLite full search,19,11.552799987839535
+after,SQLite full search,20,23.65069999359548
+after,SQLite full search,21,20.65779999247752
+after,SQLite full search,22,13.400199997704476
+after,SQLite full search,23,11.206499999389052
+after,SQLite full search,24,16.543900012038648
+after,SQLite full search,25,12.658099993132055
+after,SQLite full search,26,8.380599989322945
+after,SQLite full search,27,17.375499999616295
+after,SQLite full search,28,17.932700022356585
+after,SQLite full search,29,16.971300006844103
+after,SQLite full search,30,23.08019998599775
+after,SQLite full search,31,20.44769999338314
+after,SQLite full search,32,12.080599990440533
+after,SQLite full search,33,13.058100012131035
+after,SQLite full search,34,12.555499997688457
+after,SQLite full search,35,15.045500011183321
+after,SQLite full search,36,19.88010000786744
+after,SQLite full search,37,18.79139998345636
+after,SQLite full search,38,16.94229998975061
+after,SQLite full search,39,24.004500010050833
+after,SQLite full search,40,18.751700001303107
+after,SQLite full search,41,11.041199992178008
+after,SQLite full search,42,17.317299993010238
+after,SQLite full search,43,14.773899980355054
+after,SQLite full search,44,12.449700006982312
+after,SQLite full search,45,11.442199989687651
+after,SQLite full search,46,14.799399999901652
+after,SQLite full search,47,13.179500005207956
+after,SQLite full search,48,10.135499993339181
+after,SQLite full search,49,13.802400004351512
+after,SQLite full search,50,17.836800019722432
+after,SQLite full search,51,15.521799999987707
+after,SQLite full search,52,13.539399980800226
+after,SQLite full search,53,17.037299985531718
+after,SQLite full search,54,11.802199995145202
+after,SQLite full search,55,22.494600008940324
+after,SQLite full search,56,21.685200015781447
+after,SQLite full search,57,18.019899987848476
+after,SQLite full search,58,15.71969999349676
+after,SQLite full search,59,20.981299981940538
+after,SQLite full search,60,8.593700011260808
+after,SQLite full search,61,13.386500009801239
+after,SQLite full search,62,14.466599997831509
+after,SQLite full search,63,14.250500011257827
+after,SQLite full search,64,14.800300006754696
+after,SQLite full search,65,23.808900004951283
+after,SQLite full search,66,16.3734000234399
+after,SQLite full search,67,12.263900018297136
+after,SQLite full search,68,15.842299995711073
+after,SQLite full search,69,15.03100001718849
+after,SQLite full search,70,16.080700006568804
+after,SQLite full search,71,12.6987999828998
+after,SQLite full search,72,11.961500014876947
+after,SQLite full search,73,11.471200006781146
+after,SQLite full search,74,20.090200006961823
+after,SQLite full search,75,22.08930000779219
+after,SQLite full search,76,37.96879999572411
+after,SQLite full search,77,20.692600024631247
+after,SQLite full search,78,21.792500017909333
+after,SQLite full search,79,23.797200003173202
+after,SQLite full search,80,16.161699983058497
+after,SQLite full search,81,12.358500011032447
+after,SQLite full search,82,17.951899993931875
+after,SQLite full search,83,12.451699993107468
+after,SQLite full search,84,22.578500007512048
+after,SQLite full search,85,9.527099988190457
+after,SQLite full search,86,15.86489999317564
+after,SQLite full search,87,18.367800017585978
+after,SQLite full search,88,27.569099998800084
+after,SQLite full search,89,26.828000001842156
+after,SQLite full search,90,22.71299998392351
+after,SQLite full search,91,23.475099995266646
+after,SQLite full search,92,7.927899976493791
+after,SQLite full search,93,19.355199998244643
+after,SQLite full search,94,16.872200008947402
+after,SQLite full search,95,15.64579998375848
+after,SQLite full search,96,17.85340000060387
+after,SQLite full search,97,16.708499984815717
+after,SQLite full search,98,14.703900000313297
+after,SQLite full search,99,29.83079999103211
+after,SQLite full search,100,24.035800015553832
+after,SQLite full search,101,19.087099994067103
+after,SQLite full search,102,8.847200020682067
+after,SQLite full search,103,15.061300015076995
+after,SQLite full search,104,12.16549999662675
+after,SQLite full search,105,11.05429997551255
+after,SQLite full search,106,18.884899996919557
+after,SQLite full search,107,10.848000005353242
+after,SQLite full search,108,9.522700012894347
+after,SQLite full search,109,13.371100008953363
+after,SQLite full search,110,12.042099988320842
+after,SQLite full search,111,14.453799987677485
+after,SQLite full search,112,15.551399992546067
+after,SQLite full search,113,19.07989999745041
+after,SQLite full search,114,12.833799992222339
+after,SQLite full search,115,6.256900000153109
+after,SQLite full search,116,10.904900002060458
+after,SQLite full search,117,9.20820000465028
+after,SQLite full search,118,11.623700003838167
+after,SQLite full search,119,15.1287000044249
+after,SQLite full search,120,9.460599976591766
+after,SQLite full search,121,12.460600002668798
+after,SQLite full search,122,12.760299985529855
+after,SQLite full search,123,21.08479998423718
+after,SQLite full search,124,12.867899989942089
+after,SQLite full search,125,12.963799992576241
+after,SQLite full search,126,17.551400000229478
+after,SQLite full search,127,12.143800006015226
+after,SQLite full search,128,7.901500008301809
+after,SQLite full search,129,15.404600009787828
+after,SQLite full search,130,19.402699981583282
+after,SQLite full search,131,15.037600009236485
+after,SQLite full search,132,18.010700005106628
+after,SQLite full search,133,16.563699988182634
+after,SQLite full search,134,11.275900003965944
+after,SQLite full search,135,12.186799984192476
+after,SQLite full search,136,12.697800004389137
+after,SQLite full search,137,15.458699985174462
+after,SQLite full search,138,19.088300003204495
+after,SQLite full search,139,18.91430001705885
+after,SQLite full search,140,17.303299973718822
+after,SQLite full search,141,10.69290001760237
+after,SQLite full search,142,12.233100016601384
+after,SQLite full search,143,11.42160000745207
+after,SQLite full search,144,16.680900007486343
+after,SQLite full search,145,14.534999994793907
+after,SQLite full search,146,10.885700001381338
+after,SQLite full search,147,11.019500001566485
+after,SQLite full search,148,12.21590000204742
+after,SQLite full search,149,11.95949999964796
+after,SQLite full search,150,8.314000006066635
+after,SQLite full search,151,11.300999991362914
+after,SQLite full search,152,15.308999980334193
+after,SQLite full search,153,14.585400000214577
+after,SQLite full search,154,13.391599990427494
+after,SQLite full search,155,14.415599987842143
+after,SQLite full search,156,10.008499986724928
+after,SQLite full search,157,17.11280000745319
+after,SQLite full search,158,17.524800001410767
+after,SQLite full search,159,17.916300013894215
+after,SQLite full search,160,14.231199980713427
+after,SQLite full search,161,17.438000009860843
+after,SQLite full search,162,7.995300024049357
+after,SQLite full search,163,13.786900002742186
+after,SQLite full search,164,12.922199995955452
+after,SQLite full search,165,12.232799985213205
+after,SQLite full search,166,10.808499995619059
+after,SQLite full search,167,18.239600001834333
+after,SQLite full search,168,14.205099985701963
+after,SQLite full search,169,10.409000009531155
+after,SQLite full search,170,13.845900015439838
+after,SQLite full search,171,14.86060000024736
+after,SQLite full search,172,15.713300002971664
+after,SQLite full search,173,13.315700023667887
+after,SQLite full search,174,10.922699992079288
+after,SQLite full search,175,10.735000018030405
+after,SQLite full search,176,18.9230999967549
+after,SQLite full search,177,18.98389999405481
+after,SQLite full search,178,19.670500012580305
+after,SQLite full search,179,16.375900013372302
+after,SQLite full search,180,19.728399987798184
+after,SQLite full search,181,22.792500007199124
+after,SQLite full search,182,15.557200007606298
+after,SQLite full search,183,11.101299984147772
+after,SQLite full search,184,18.151700001908466
+after,SQLite full search,185,10.465300001669675
+after,SQLite full search,186,21.653000003425404
+after,SQLite full search,187,9.472700010519475
+after,SQLite full search,188,14.894699997967109
+after,SQLite full search,189,17.923299979884177
+after,SQLite full search,190,21.475200017448515
+after,SQLite full search,191,18.331400002352893
+after,SQLite full search,192,21.46689998335205
+after,SQLite full search,193,24.03910001157783
+after,SQLite full search,194,7.711600017501041
+after,SQLite full search,195,18.60759998089634
+after,SQLite full search,196,17.40009998320602
+after,SQLite full search,197,13.47959999111481
+after,SQLite full search,198,20.082700008060783
+after,SQLite full search,199,16.17020001867786
+after,SQLite full search,200,14.266100013628602
+after,SQLite full search,201,29.36220000265166
+after,SQLite full search,202,24.57710000453517
+after,SQLite full search,203,21.163600002182648
+after,SQLite full search,204,8.926000009523705
+after,SQLite full search,205,15.482600021641701
+after,SQLite full search,206,11.800200009020045
+after,SQLite full search,207,8.825500000966713
+after,SQLite full search,208,18.05059998878278
+after,SQLite full search,209,10.986299981595948
+after,SQLite full search,210,9.832300012931228
+after,SQLite full search,211,12.561900017317384
+after,SQLite full search,212,10.332300007576123
+after,SQLite full search,213,13.62919999519363
+after,SQLite full search,214,13.898700010031462
+after,SQLite full search,215,19.593100005295128
+after,SQLite full search,216,12.563099997350946
+after,SQLite full search,217,6.166199978906661
+after,SQLite full search,218,11.384500015992671
+after,SQLite full search,219,10.151199996471405
+after,SQLite full search,220,11.629500018898398
+after,SQLite full search,221,14.103800000157207
+after,SQLite full search,222,9.03350001317449
+after,SQLite full search,223,11.496800027089193
+after,SQLite full search,224,12.716199998976663
+after,SQLite full search,225,21.84800000395626
+after,SQLite full search,226,14.951099990867078
+after,SQLite full search,227,10.260699986247346
+after,SQLite full search,228,16.384499991545454
+after,SQLite full search,229,11.772600002586842
+after,SQLite full search,230,7.489400013582781
+after,SQLite full search,231,14.799299999140203
+after,SQLite full search,232,18.910500017227605
+after,SQLite full search,233,14.375099999597296
+after,SQLite full search,234,18.204099993454292
+after,SQLite full search,235,18.303099990589544
+after,SQLite full search,236,11.217499995836988
+after,SQLite full search,237,12.65589997638017
+after,SQLite full search,238,12.358300009509549
+after,SQLite full search,239,15.046699991216883
+after,SQLite full search,240,20.433800003957003
+after,SQLite full search,241,18.848500010790303
+after,SQLite full search,242,15.80720001948066
+after,SQLite full search,243,10.682899999665096
+after,SQLite full search,244,11.601400008657947
+after,SQLite full search,245,12.469700013753027
+after,SQLite full search,246,16.40259998384863
+after,SQLite full search,247,14.954100013710558
+after,SQLite full search,248,11.72400001087226
+after,SQLite full search,249,10.713299998315051
+after,SQLite full search,250,12.589000019943342
+after,SQLite full search,251,10.918400017544627
+after,SQLite full search,252,8.382499974686652
+after,SQLite full search,253,11.612400005105883
+after,SQLite full search,254,15.313399984734133
+after,SQLite full search,255,14.03809999465011
+after,SQLite full search,256,12.150299997301772
+after,SQLite full search,257,12.714899989077821
+after,SQLite full search,258,9.97280000592582
+after,SQLite full search,259,16.92160000675358
+after,SQLite full search,260,20.94570000190288
+after,SQLite full search,261,16.632900020340458
+after,SQLite full search,262,15.297100006137043
+after,SQLite full search,263,18.468599999323487
+after,SQLite full search,264,7.959100010339171
+after,SQLite full search,265,13.211599987698719
+after,SQLite full search,266,14.11379998899065
+after,SQLite full search,267,12.425699998857453
+after,SQLite full search,268,12.201600009575486
+after,SQLite full search,269,17.13449999806471
+after,SQLite full search,270,12.434900010703132
+after,SQLite full search,271,10.46760001918301
+after,SQLite full search,272,13.741500006290153
+after,SQLite full search,273,15.939999982947484
+after,SQLite full search,274,16.373499995097518
+after,SQLite full search,275,13.444199983496219
+after,SQLite full search,276,10.689399990951642
+after,SQLite full search,277,10.855300002731383
+after,SQLite full search,278,19.226199976401404
+after,SQLite full search,279,19.936800003051758
+after,SQLite full search,280,20.49199998145923
+after,SQLite full search,281,17.195899999933317
+after,SQLite full search,282,19.744799996260554
+after,SQLite full search,283,18.589300016174093
+after,SQLite full search,284,16.47539998521097
+after,SQLite full search,285,11.899599980097264
+after,SQLite full search,286,20.18839999800548
+after,SQLite full search,287,11.212299985345453
+after,SQLite full search,288,20.981600013328716
+after,SQLite full search,289,9.026999992784113
+after,SQLite full search,290,12.238299997989088
+after,SQLite full search,291,15.621500002453104
+after,SQLite full search,292,20.53809998324141
+after,SQLite full search,293,18.999299994902685
+after,SQLite full search,294,21.26670000143349
+after,SQLite full search,295,21.170100022573024
+after,SQLite full search,296,8.63039999967441
+after,SQLite full search,297,18.18069998989813
+after,SQLite full search,298,20.676700019976124
+after,SQLite full search,299,14.021300012245774
+after,SQLite full search,300,17.323500011116266
+after,SQLite full search,301,16.988500021398067
+after,SQLite full search,302,13.900300022214651
+after,SQLite full search,303,31.08870002324693
+after,SQLite full search,304,26.274400006514043
+after,SQLite full search,305,20.13799999258481
+after,SQLite full search,306,9.578299999702722
+after,SQLite full search,307,15.32129998668097
+after,SQLite full search,308,11.980500014033169
+after,SQLite full search,309,12.336499989032745
+after,SQLite full search,310,17.906099994434044
+after,SQLite full search,311,11.370799998985603
+after,SQLite full search,312,9.998999972594902
+after,SQLite full search,313,12.528199993539602
+after,SQLite full search,314,11.553799995454028
+after,SQLite full search,315,13.61749999341555
+after,SQLite full search,316,14.932499994756654
+after,SQLite full search,317,19.36909998767078
+after,SQLite full search,318,12.139400001615286
+after,SQLite full search,319,6.2904999940656126
+after,SQLite full search,320,11.871399998199195
+after,SQLite full search,321,8.831199986161664
+after,SQLite full search,322,11.38179999543354
+after,SQLite full search,323,14.411699987249449
+after,SQLite full search,324,9.486099996138364
+after,SQLite full search,325,12.665299989748746
+after,SQLite full search,326,15.67239998257719
+after,SQLite full search,327,21.14110000547953
+after,SQLite full search,328,12.56270002340898
+after,SQLite full search,329,10.631500015733764
+after,SQLite full search,330,17.3600000271108
+after,SQLite full search,331,10.958200000459328
+after,SQLite full search,332,8.234499982791021
+after,SQLite full search,333,15.015800017863512
+after,SQLite full search,334,19.35720001347363
+after,SQLite full search,335,14.582299976609647
+after,SQLite full search,336,17.907100002048537
+after,SQLite full search,337,17.81329998630099
+after,SQLite full search,338,14.03960000607185
+after,SQLite full search,339,14.036600012332201
+after,SQLite full search,340,12.854099972173572
+after,SQLite full search,341,14.392000011866912
+after,SQLite full search,342,20.333099993877113
+after,SQLite full search,343,18.974000005982816
+after,SQLite full search,344,18.070399994030595
+after,SQLite full search,345,13.705399993341416
+after,SQLite full search,346,11.875500000314787
+after,SQLite full search,347,10.63200001954101
+after,SQLite full search,348,17.087900021579117
+after,SQLite full search,349,14.628900011302903
+after,SQLite full search,350,12.30909998412244
+after,SQLite full search,351,11.83219999074936
+after,SQLite full search,352,16.053800005465746
+after,SQLite full search,353,11.561099992832169
+after,SQLite full search,354,9.154400002444163
+after,SQLite full search,355,11.332099995343015
+after,SQLite full search,356,16.227699990849942
+after,SQLite full search,357,14.11960000405088
+after,SQLite full search,358,12.528599996585399
+after,SQLite full search,359,14.43370000924915
+after,SQLite full search,360,9.892999980365857
+after,SQLite full search,361,17.48270000098273
+after,SQLite full search,362,18.971199984662235
+after,SQLite full search,363,15.732300002127886
+after,SQLite full search,364,14.030100021045655
+after,SQLite full search,365,17.6723999902606
+after,SQLite full search,366,9.302699996624142
+after,SQLite full search,367,13.6427000106778
+after,SQLite full search,368,13.649200001964346
+after,SQLite full search,369,12.680500018177554
+after,SQLite full search,370,12.189600005513057
+after,SQLite full search,371,17.93189998716116
+after,SQLite full search,372,12.323300004936755
+after,SQLite full search,373,9.198100015055388
+after,SQLite full search,374,14.79389998712577
+after,SQLite full search,375,14.735500008100644
+after,SQLite full search,376,16.957500018179417
+after,SQLite full search,377,12.722400017082691
+after,SQLite full search,378,9.963500022422522
+after,SQLite full search,379,11.426600016420707
+after,SQLite full search,380,21.927300025708973
+after,SQLite full search,381,19.694300019182265
+after,SQLite full search,382,20.215500000631437
+after,SQLite full search,383,17.26490000146441
+after,SQLite full search,384,20.642899995436892
+after,SQLite full search,385,18.92149998457171
+after,SQLite full search,386,16.539500007638708
+after,SQLite full search,387,11.742100003175437
+after,SQLite full search,388,18.562299985205755
+after,SQLite full search,389,10.954199999105185
+after,SQLite full search,390,20.583599980454892
+after,SQLite full search,391,9.567900007823482
+after,SQLite full search,392,14.770499983569607
+after,SQLite full search,393,17.05940000829287
+after,SQLite full search,394,22.328399994876236
+after,SQLite full search,395,19.572499993955716
+after,SQLite full search,396,21.502199990209192
+after,SQLite full search,397,27.48239997890778
+after,SQLite full search,398,9.965800010832027
+after,SQLite full search,399,22.910800005774945
+after,SQLite full search,400,19.33329997700639
+after,SQLite full search,401,14.224699989426881
+after,SQLite full search,402,19.959700002800673
+after,SQLite full search,403,17.35229999758303
+after,SQLite full search,404,15.594700002111495
+after,SQLite full search,405,31.661099987104535
+after,SQLite full search,406,24.341599986655638
+after,SQLite full search,407,19.429099978879094
+after,SQLite full search,408,9.68079999438487
+after,SQLite full search,409,16.16160001140088
+after,SQLite full search,410,12.511000008089468
+after,SQLite full search,411,6.416399992303923
+after,SQLite full search,412,16.815299983136356
+after,SQLite full search,413,12.472800008254126
+after,SQLite full search,414,10.308199998689815
+after,SQLite full search,415,13.185300020268187
+after,SQLite full search,416,13.104600016959012
+after,SQLite full search,417,16.611099999863654
+after,SQLite full search,418,16.47370000137016
+after,SQLite full search,419,21.812699997099116
+after,SQLite full search,420,12.84099998883903
+after,SQLite full search,421,6.549999990966171
+after,SQLite full search,422,12.218099989695475
+after,SQLite full search,423,10.02149999840185
+after,SQLite full search,424,11.573199997656047
+after,SQLite full search,425,16.042100003687665
+after,SQLite full search,426,11.1105999967549
+after,SQLite full search,427,15.063599974382669
+after,SQLite full search,428,16.299500013701618
+after,SQLite full search,429,21.833800012245774
+after,SQLite full search,430,12.710900016827509
+after,SQLite full search,431,9.806600020965561
+after,SQLite full search,432,15.234300022711977
+after,SQLite full search,433,11.19660001131706
+after,SQLite full search,434,7.297499978449196
+after,SQLite full search,435,14.247300015995279
+after,SQLite full search,436,17.54050000454299
+after,SQLite full search,437,14.942200010409579
+after,SQLite full search,438,17.615899996599182
+after,SQLite full search,439,16.661400004522875
+after,SQLite full search,440,10.835199995199218
+after,SQLite full search,441,13.026699976762757
+after,SQLite full search,442,12.070199998561293
+after,SQLite full search,443,14.498400007141754
+after,SQLite full search,444,20.51440000650473
+after,SQLite full search,445,17.944299994269386
+after,SQLite full search,446,16.827199986437336
+after,SQLite full search,447,12.053699989337474
+after,SQLite full search,448,11.530999996466562
+after,SQLite full search,449,10.901500005275011
+after,SQLite full search,450,16.10060001257807
+after,SQLite full search,451,14.529399981256574
+after,SQLite full search,452,11.997399997198954
+after,SQLite full search,453,11.452899983851239
+after,SQLite full search,454,12.851900013629347
+after,SQLite full search,455,14.527600025758147
+after,SQLite full search,456,9.56820001010783
+after,SQLite full search,457,12.602700007846579
+after,SQLite full search,458,13.965399994049221
+after,SQLite full search,459,14.016599976457655
+after,SQLite full search,460,13.108799990732223
+after,SQLite full search,461,13.973699999041855
+after,SQLite full search,462,11.07649999903515
+after,SQLite full search,463,17.825600021751598
+after,SQLite full search,464,18.39840001775883
+after,SQLite full search,465,14.697100006742403
+after,SQLite full search,466,14.244899997720495
+after,SQLite full search,467,17.756500019459054
+after,SQLite full search,468,9.235999983502552
+after,SQLite full search,469,14.150600007269531
+after,SQLite full search,470,13.86490001459606
+after,SQLite full search,471,12.402899999869987
+after,SQLite full search,472,10.645200003637001
+after,SQLite full search,473,16.419899999164045
+after,SQLite full search,474,13.349100016057491
+after,SQLite full search,475,10.254799999529496
+after,SQLite full search,476,15.243800007738173
+after,SQLite full search,477,15.086900006281212
+after,SQLite full search,478,16.443700005766004
+after,SQLite full search,479,13.921800011303276
+after,SQLite full search,480,10.069799987832084
+after,SQLite full search,481,10.759800003143027
+after,SQLite full search,482,18.597600021166727
+after,SQLite full search,483,20.31870000064373
+after,SQLite full search,484,20.322600001236424
+after,SQLite full search,485,16.975200007436797
+after,SQLite full search,486,18.0980000004638
+after,SQLite full search,487,19.620299979578704
+after,SQLite full search,488,15.555599995423108
+after,SQLite full search,489,12.423500011209399
+after,SQLite full search,490,18.241200014017522
+after,SQLite full search,491,9.176599996862933
+after,SQLite full search,492,20.633400010410696
+after,SQLite full search,493,9.733099985169247
+after,SQLite full search,494,12.236699985805899
+after,SQLite full search,495,17.869100003736094
+after,SQLite full search,496,21.469400002388284
+after,SQLite full search,497,19.118099997285753
+after,SQLite full search,498,19.832299993140623
+after,SQLite full search,499,22.849000000860542
+after,SQLite full search,500,8.111200004350394
+after,SQLite full search,501,17.6725999917835
+after,SQLite full search,502,16.325300006428733
+after,SQLite full search,503,14.03819999541156
+after,SQLite full search,504,17.287100024987012
+after,SQLite full search,505,15.54650001344271
+after,SQLite full search,506,14.553200016962364
+after,SQLite full search,507,29.205099999671802
+after,SQLite full search,508,23.925399989821017
+after,SQLite full search,509,18.67700001457706
+surfcore,RAM ranking,0,0.2505999999999915
+surfcore,RAM ranking,1,0.19780000000000086
+surfcore,RAM ranking,2,0.15210000000000434
+surfcore,RAM ranking,3,0.18179999999999552
+surfcore,RAM ranking,4,0.15930000000000177
+surfcore,RAM ranking,5,0.150100000000009
+surfcore,RAM ranking,6,0.1957000000000022
+surfcore,RAM ranking,7,0.16270000000000095
+surfcore,RAM ranking,8,0.16660000000000252
+surfcore,RAM ranking,9,0.1402000000000072
+surfcore,RAM ranking,10,0.21390000000000953
+surfcore,RAM ranking,11,0.3872999999999962
+surfcore,RAM ranking,12,0.165300000000002
+surfcore,RAM ranking,13,0.1811000000000007
+surfcore,RAM ranking,14,0.16809999999999548
+surfcore,RAM ranking,15,0.2068000000000012
+surfcore,RAM ranking,16,0.24960000000000093
+surfcore,RAM ranking,17,0.3423999999999978
+surfcore,RAM ranking,18,0.2225999999999999
+surfcore,RAM ranking,19,0.21099999999999852
+surfcore,RAM ranking,20,0.26090000000000657
+surfcore,RAM ranking,21,0.22239999999999327
+surfcore,RAM ranking,22,0.19710000000000605
+surfcore,RAM ranking,23,0.20350000000000534
+surfcore,RAM ranking,24,0.19469999999999743
+surfcore,RAM ranking,25,0.22809999999999775
+surfcore,RAM ranking,26,0.26260000000000616
+surfcore,RAM ranking,27,0.23649999999999238
+surfcore,RAM ranking,28,0.275100000000009
+surfcore,RAM ranking,29,0.20350000000000534
+surfcore,RAM ranking,30,0.22419999999999618
+surfcore,RAM ranking,31,0.247099999999989
+surfcore,RAM ranking,32,0.19610000000000127
+surfcore,RAM ranking,33,0.23260000000000502
+surfcore,RAM ranking,34,0.26090000000000657
+surfcore,RAM ranking,35,0.2676000000000016
+surfcore,RAM ranking,36,0.2236999999999938
+surfcore,RAM ranking,37,0.18549999999999045
+surfcore,RAM ranking,38,0.23510000000000275
+surfcore,RAM ranking,39,0.2406000000000006
+surfcore,RAM ranking,40,0.22630000000000905
+surfcore,RAM ranking,41,0.21009999999999707
+surfcore,RAM ranking,42,0.2278999999999911
+surfcore,RAM ranking,43,0.2044000000000068
+surfcore,RAM ranking,44,0.18990000000000862
+surfcore,RAM ranking,45,0.19259999999999877
+surfcore,RAM ranking,46,0.20779999999999177
+surfcore,RAM ranking,47,0.1905000000000001
+surfcore,RAM ranking,48,0.23519999999999186
+surfcore,RAM ranking,49,0.19490000000000407
+surfcore,RAM ranking,50,0.18259999999999366
+surfcore,RAM ranking,51,0.19409999999999172
+surfcore,RAM ranking,52,0.3007999999999953
+surfcore,RAM ranking,53,0.21880000000000166
+surfcore,RAM ranking,54,0.1805000000000092
+surfcore,RAM ranking,55,0.19819999999999993
+surfcore,RAM ranking,56,0.1974999999999909
+surfcore,RAM ranking,57,0.21099999999999852
+surfcore,RAM ranking,58,0.22760000000000957
+surfcore,RAM ranking,59,0.21989999999999554
+surfcore,RAM ranking,60,0.16839999999999122
+surfcore,RAM ranking,61,0.3247999999999962
+surfcore,RAM ranking,62,0.24280000000000257
+surfcore,RAM ranking,63,0.21399999999999864
+surfcore,RAM ranking,64,0.20010000000000616
+surfcore,RAM ranking,65,0.21039999999999281
+surfcore,RAM ranking,66,0.18529999999999802
+surfcore,RAM ranking,67,0.20190000000000907
+surfcore,RAM ranking,68,0.21299999999999386
+surfcore,RAM ranking,69,0.18529999999999802
+surfcore,RAM ranking,70,0.18529999999999802
+surfcore,RAM ranking,71,0.5437000000000012
+surfcore,RAM ranking,72,0.17510000000000048
+surfcore,RAM ranking,73,0.19129999999999825
+surfcore,RAM ranking,74,0.23909999999999343
+surfcore,RAM ranking,75,0.24839999999998952
+surfcore,RAM ranking,76,0.21199999999998909
+surfcore,RAM ranking,77,0.20589999999999975
+surfcore,RAM ranking,78,0.2201999999999913
+surfcore,RAM ranking,79,0.24020000000000152
+surfcore,RAM ranking,80,0.2674000000000092
+surfcore,RAM ranking,81,0.23579999999999757
+surfcore,RAM ranking,82,0.22930000000000916
+surfcore,RAM ranking,83,0.23020000000001062
+surfcore,RAM ranking,84,0.22849999999999682
+surfcore,RAM ranking,85,0.2213000000000136
+surfcore,RAM ranking,86,0.19469999999999743
+surfcore,RAM ranking,87,0.19549999999999557
+surfcore,RAM ranking,88,0.18559999999999377
+surfcore,RAM ranking,89,0.22039999999999793
+surfcore,RAM ranking,90,0.25500000000000966
+surfcore,RAM ranking,91,0.4181999999999988
+surfcore,RAM ranking,92,0.19780000000000086
+surfcore,RAM ranking,93,0.21339999999999293
+surfcore,RAM ranking,94,0.18940000000000623
+surfcore,RAM ranking,95,0.18720000000000425
+surfcore,RAM ranking,96,0.18729999999999336
+surfcore,RAM ranking,97,0.22469999999999857
+surfcore,RAM ranking,98,0.20349999999999113
+surfcore,RAM ranking,99,0.20709999999999695
+surfcore,RAM ranking,100,0.1957000000000022
+surfcore,RAM ranking,101,0.2202999999999946
+surfcore,RAM ranking,102,0.2155000000000058
+surfcore,RAM ranking,103,0.18300000000000693
+surfcore,RAM ranking,104,0.15380000000000393
+surfcore,RAM ranking,105,0.17419999999999902
+surfcore,RAM ranking,106,0.15639999999999077
+surfcore,RAM ranking,107,0.14560000000000173
+surfcore,RAM ranking,108,0.16490000000000293
+surfcore,RAM ranking,109,0.14439999999999031
+surfcore,RAM ranking,110,0.16450000000000387
+surfcore,RAM ranking,111,0.1535999999999973
+surfcore,RAM ranking,112,0.2534999999999883
+surfcore,RAM ranking,113,0.1991000000000014
+surfcore,RAM ranking,114,0.15810000000000457
+surfcore,RAM ranking,115,0.1700000000000017
+surfcore,RAM ranking,116,0.16079999999999472
+surfcore,RAM ranking,117,0.18320000000001357
+surfcore,RAM ranking,118,0.15560000000000684
+surfcore,RAM ranking,119,0.16160000000000707
+surfcore,RAM ranking,120,0.18590000000000373
+surfcore,RAM ranking,121,0.1927000000000021
+surfcore,RAM ranking,122,0.19940000000001135
+surfcore,RAM ranking,123,0.33559999999999945
+surfcore,RAM ranking,124,0.19140000000000157
+surfcore,RAM ranking,125,0.19419999999999504
+surfcore,RAM ranking,126,0.19129999999999825
+surfcore,RAM ranking,127,0.1963000000000079
+surfcore,RAM ranking,128,0.21689999999999543
+surfcore,RAM ranking,129,0.20490000000000919
+surfcore,RAM ranking,130,0.24089999999999634
+surfcore,RAM ranking,131,0.21219999999999573
+surfcore,RAM ranking,132,0.2623999999999995
+surfcore,RAM ranking,133,0.3796999999999997
+surfcore,RAM ranking,134,0.23219999999999175
+surfcore,RAM ranking,135,0.2078999999999951
+surfcore,RAM ranking,136,0.2002999999999986
+surfcore,RAM ranking,137,0.2068000000000012
+surfcore,RAM ranking,138,0.19789999999998997
+surfcore,RAM ranking,139,0.17300000000000182
+surfcore,RAM ranking,140,0.21999999999999886
+surfcore,RAM ranking,141,0.36599999999999966
+surfcore,RAM ranking,142,0.223700000000008
+surfcore,RAM ranking,143,0.20050000000000523
+surfcore,RAM ranking,144,0.20600000000000307
+surfcore,RAM ranking,145,0.18840000000000146
+surfcore,RAM ranking,146,0.17530000000000712
+surfcore,RAM ranking,147,0.17780000000000484
+surfcore,RAM ranking,148,0.19029999999999347
+surfcore,RAM ranking,149,0.17499999999999716
+surfcore,RAM ranking,150,0.2430000000000092
+surfcore,RAM ranking,151,0.21910000000001162
+surfcore,RAM ranking,152,0.17910000000000537
+surfcore,RAM ranking,153,0.1828999999999894
+surfcore,RAM ranking,154,0.1834999999999951
+surfcore,RAM ranking,155,0.18780000000000996
+surfcore,RAM ranking,156,0.1664999999999992
+surfcore,RAM ranking,157,0.17749999999999488
+surfcore,RAM ranking,158,0.176400000000001
+surfcore,RAM ranking,159,0.18819999999999482
+surfcore,RAM ranking,160,0.3505000000000109
+surfcore,RAM ranking,161,0.2096000000000089
+surfcore,RAM ranking,162,0.14970000000000994
+surfcore,RAM ranking,163,0.16979999999999507
+surfcore,RAM ranking,164,0.20989999999999043
+surfcore,RAM ranking,165,0.18710000000000093
+surfcore,RAM ranking,166,0.1758999999999986
+surfcore,RAM ranking,167,0.2530000000000001
+surfcore,RAM ranking,168,0.22639999999999816
+surfcore,RAM ranking,169,0.21280000000000143
+surfcore,RAM ranking,170,0.17940000000000111
+surfcore,RAM ranking,171,0.17130000000000223
+surfcore,RAM ranking,172,0.26080000000000325
+surfcore,RAM ranking,173,0.16849999999999454
+surfcore,RAM ranking,174,0.15689999999999316
+surfcore,RAM ranking,175,0.17719999999999914
+surfcore,RAM ranking,176,0.22979999999999734
+surfcore,RAM ranking,177,0.21240000000000236
+surfcore,RAM ranking,178,0.25209999999999866
+surfcore,RAM ranking,179,0.21600000000000819
+surfcore,RAM ranking,180,0.20189999999999486
+surfcore,RAM ranking,181,0.1903999999999968
+surfcore,RAM ranking,182,0.32169999999999277
+surfcore,RAM ranking,183,0.231899999999996
+surfcore,RAM ranking,184,0.22390000000000043
+surfcore,RAM ranking,185,0.41219999999999857
+surfcore,RAM ranking,186,0.2331000000000074
+surfcore,RAM ranking,187,0.2289000000000101
+surfcore,RAM ranking,188,0.22329999999999472
+surfcore,RAM ranking,189,0.4479000000000042
+surfcore,RAM ranking,190,0.34600000000000364
+surfcore,RAM ranking,191,0.2283000000000044
+surfcore,RAM ranking,192,0.25780000000000314
+surfcore,RAM ranking,193,0.21620000000000061
+surfcore,RAM ranking,194,0.17429999999998813
+surfcore,RAM ranking,195,0.1967999999999961
+surfcore,RAM ranking,196,0.21350000000001046
+surfcore,RAM ranking,197,0.19350000000000023
+surfcore,RAM ranking,198,0.19530000000000314
+surfcore,RAM ranking,199,0.22550000000001091
+surfcore,RAM ranking,200,0.21600000000000819
+surfcore,RAM ranking,201,0.20589999999999975
+surfcore,RAM ranking,202,0.19599999999999795
+surfcore,RAM ranking,203,0.20340000000000202
+surfcore,RAM ranking,204,0.19190000000000396
+surfcore,RAM ranking,205,0.21829999999999927
+surfcore,RAM ranking,206,0.1565000000000083
+surfcore,RAM ranking,207,0.18410000000000082
+surfcore,RAM ranking,208,0.16849999999999454
+surfcore,RAM ranking,209,0.1582000000000079
+surfcore,RAM ranking,210,0.17710000000001003
+surfcore,RAM ranking,211,0.1594000000000051
+surfcore,RAM ranking,212,0.1664000000000101
+surfcore,RAM ranking,213,0.14230000000000587
+surfcore,RAM ranking,214,0.223700000000008
+surfcore,RAM ranking,215,0.20459999999999923
+surfcore,RAM ranking,216,0.1599999999999966
+surfcore,RAM ranking,217,0.17199999999999704
+surfcore,RAM ranking,218,0.16509999999999536
+surfcore,RAM ranking,219,0.1839999999999975
+surfcore,RAM ranking,220,0.1570999999999998
+surfcore,RAM ranking,221,0.16200000000000614
+surfcore,RAM ranking,222,0.19319999999999027
+surfcore,RAM ranking,223,0.18189999999999884
+surfcore,RAM ranking,224,0.18430000000000746
+surfcore,RAM ranking,225,0.1950999999999965
+surfcore,RAM ranking,226,0.1740999999999957
+surfcore,RAM ranking,227,0.17779999999999063
+surfcore,RAM ranking,228,0.17210000000000036
+surfcore,RAM ranking,229,0.14749999999999375
+surfcore,RAM ranking,230,0.2476000000000056
+surfcore,RAM ranking,231,0.16249999999999432
+surfcore,RAM ranking,232,0.19789999999998997
+surfcore,RAM ranking,233,0.16330000000000666
+surfcore,RAM ranking,234,0.17849999999999966
+surfcore,RAM ranking,235,0.1932999999999936
+surfcore,RAM ranking,236,0.2546999999999997
+surfcore,RAM ranking,237,0.16920000000000357
+surfcore,RAM ranking,238,0.1740999999999957
+surfcore,RAM ranking,239,0.18269999999999698
+surfcore,RAM ranking,240,0.1734000000000009
+surfcore,RAM ranking,241,0.15380000000000393
+surfcore,RAM ranking,242,0.19240000000000634
+surfcore,RAM ranking,243,0.2038999999999902
+surfcore,RAM ranking,244,0.18719999999999004
+surfcore,RAM ranking,245,0.1740000000000066
+surfcore,RAM ranking,246,0.2002999999999986
+surfcore,RAM ranking,247,0.18849999999999056
+surfcore,RAM ranking,248,0.17790000000002237
+surfcore,RAM ranking,249,0.17549999999999955
+surfcore,RAM ranking,250,0.18430000000000746
+surfcore,RAM ranking,251,0.16929999999999268
+surfcore,RAM ranking,252,0.21420000000000528
+surfcore,RAM ranking,253,0.21990000000002397
+surfcore,RAM ranking,254,0.29120000000000346
+surfcore,RAM ranking,255,0.23519999999999186
+surfcore,RAM ranking,256,0.20289999999999964
+surfcore,RAM ranking,257,0.2032000000000096
+surfcore,RAM ranking,258,0.1776999999999873
+surfcore,RAM ranking,259,0.21349999999998204
+surfcore,RAM ranking,260,0.23600000000001842
+surfcore,RAM ranking,261,0.2547000000000139
+surfcore,RAM ranking,262,0.2886000000000024
+surfcore,RAM ranking,263,0.26079999999998904
+surfcore,RAM ranking,264,0.20519999999999072
+surfcore,RAM ranking,265,0.2353999999999985
+surfcore,RAM ranking,266,0.2927999999999997
+surfcore,RAM ranking,267,0.26370000000000005
+surfcore,RAM ranking,268,0.24899999999999523
+surfcore,RAM ranking,269,0.2635999999999967
+surfcore,RAM ranking,270,0.29710000000000036
+surfcore,RAM ranking,271,0.2487000000000137
+surfcore,RAM ranking,272,0.2644999999999982
+surfcore,RAM ranking,273,0.21240000000000236
+surfcore,RAM ranking,274,0.21220000000002415
+surfcore,RAM ranking,275,0.18149999999999977
+surfcore,RAM ranking,276,0.19350000000000023
+surfcore,RAM ranking,277,0.2050000000000125
+surfcore,RAM ranking,278,0.2664999999999793
+surfcore,RAM ranking,279,0.24879999999998859
+surfcore,RAM ranking,280,0.24629999999999086
+surfcore,RAM ranking,281,0.23060000000000969
+surfcore,RAM ranking,282,0.22679999999999723
+surfcore,RAM ranking,283,0.22270000000000323
+surfcore,RAM ranking,284,0.24860000000001037
+surfcore,RAM ranking,285,0.26420000000001664
+surfcore,RAM ranking,286,0.25140000000001805
+surfcore,RAM ranking,287,0.25839999999999463
+surfcore,RAM ranking,288,0.27940000000000964
+surfcore,RAM ranking,289,0.24930000000000518
+surfcore,RAM ranking,290,0.21889999999999077
+surfcore,RAM ranking,291,0.21709999999998786
+surfcore,RAM ranking,292,0.3322000000000003
+surfcore,RAM ranking,293,0.20249999999998636
+surfcore,RAM ranking,294,0.19839999999999236
+surfcore,RAM ranking,295,0.20949999999999136
+surfcore,RAM ranking,296,0.1776999999999873
+surfcore,RAM ranking,297,0.21590000000000487
+surfcore,RAM ranking,298,0.2033999999999878
+surfcore,RAM ranking,299,0.1997000000000071
+surfcore,RAM ranking,300,0.1997000000000071
+surfcore,RAM ranking,301,0.21869999999998413
+surfcore,RAM ranking,302,0.21989999999999554
+surfcore,RAM ranking,303,0.2039000000000044
+surfcore,RAM ranking,304,0.20019999999999527
+surfcore,RAM ranking,305,0.21309999999999718
+surfcore,RAM ranking,306,0.19579999999999131
+surfcore,RAM ranking,307,0.2039000000000044
+surfcore,RAM ranking,308,0.18899999999999295
+surfcore,RAM ranking,309,0.1828999999999894
+surfcore,RAM ranking,310,0.176400000000001
+surfcore,RAM ranking,311,0.15819999999999368
+surfcore,RAM ranking,312,0.18530000000001223
+surfcore,RAM ranking,313,0.15489999999999782
+surfcore,RAM ranking,314,0.16730000000001155
+surfcore,RAM ranking,315,0.1495999999999924
+surfcore,RAM ranking,316,0.28549999999998477
+surfcore,RAM ranking,317,0.2039000000000044
+surfcore,RAM ranking,318,0.1605000000000132
+surfcore,RAM ranking,319,0.17349999999999
+surfcore,RAM ranking,320,0.16779999999999973
+surfcore,RAM ranking,321,0.21279999999998722
+surfcore,RAM ranking,322,0.17150000000000887
+surfcore,RAM ranking,323,0.17719999999999914
+surfcore,RAM ranking,324,0.2033999999999878
+surfcore,RAM ranking,325,0.19669999999999277
+surfcore,RAM ranking,326,0.1998000000000104
+surfcore,RAM ranking,327,0.2109999999999843
+surfcore,RAM ranking,328,0.1897999999999911
+surfcore,RAM ranking,329,0.191599999999994
+surfcore,RAM ranking,330,0.2202000000000055
+surfcore,RAM ranking,331,0.17390000000000327
+surfcore,RAM ranking,332,0.1799999999999784
+surfcore,RAM ranking,333,0.1670000000000016
+surfcore,RAM ranking,334,0.199799999999982
+surfcore,RAM ranking,335,0.16810000000000969
+surfcore,RAM ranking,336,0.18640000000002033
+surfcore,RAM ranking,337,0.2043000000000177
+surfcore,RAM ranking,338,0.18539999999998713
+surfcore,RAM ranking,339,0.19780000000000086
+surfcore,RAM ranking,340,0.1926000000000272
+surfcore,RAM ranking,341,0.19319999999999027
+surfcore,RAM ranking,342,0.18180000000000973
+surfcore,RAM ranking,343,0.15509999999997603
+surfcore,RAM ranking,344,0.1962000000000046
+surfcore,RAM ranking,345,0.20199999999999818
+surfcore,RAM ranking,346,0.19489999999998986
+surfcore,RAM ranking,347,0.17429999999998813
+surfcore,RAM ranking,348,0.18649999999999523
+surfcore,RAM ranking,349,0.18029999999998836
+surfcore,RAM ranking,350,0.2530999999999892
+surfcore,RAM ranking,351,0.18540000000001555
+surfcore,RAM ranking,352,0.18719999999999004
+surfcore,RAM ranking,353,0.16849999999999454
+surfcore,RAM ranking,354,0.20769999999998845
+surfcore,RAM ranking,355,0.169399999999996
+surfcore,RAM ranking,356,0.15969999999998663
+surfcore,RAM ranking,357,0.16859999999999786
+surfcore,RAM ranking,358,0.17940000000001532
+surfcore,RAM ranking,359,0.17949999999999022
+surfcore,RAM ranking,360,0.15620000000001255
+surfcore,RAM ranking,361,0.16960000000000264
+surfcore,RAM ranking,362,0.17099999999999227
+surfcore,RAM ranking,363,0.1821999999999946
+surfcore,RAM ranking,364,0.1973000000000127
+surfcore,RAM ranking,365,0.1898000000000195
+surfcore,RAM ranking,366,0.15109999999998536
+surfcore,RAM ranking,367,0.16810000000000969
+surfcore,RAM ranking,368,0.20940000000001646
+surfcore,RAM ranking,369,0.18410000000000082
+surfcore,RAM ranking,370,0.17420000000001323
+surfcore,RAM ranking,371,0.1839000000000226
+surfcore,RAM ranking,372,0.17350000000001842
+surfcore,RAM ranking,373,0.1874000000000251
+surfcore,RAM ranking,374,0.17070000000001073
+surfcore,RAM ranking,375,0.19499999999999318
+surfcore,RAM ranking,376,0.2488999999999919
+surfcore,RAM ranking,377,0.25209999999998445
+surfcore,RAM ranking,378,0.15340000000000487
+surfcore,RAM ranking,379,0.17560000000000286
+surfcore,RAM ranking,380,0.22380000000001132
+surfcore,RAM ranking,381,0.20709999999999695
+surfcore,RAM ranking,382,0.20700000000002206
+surfcore,RAM ranking,383,0.22920000000002005
+surfcore,RAM ranking,384,0.20499999999998408
+surfcore,RAM ranking,385,0.1927000000000021
+surfcore,RAM ranking,386,0.21030000000001792
+surfcore,RAM ranking,387,0.22690000000000055
+surfcore,RAM ranking,388,0.23050000000000637
+surfcore,RAM ranking,389,0.2366999999999848
+surfcore,RAM ranking,390,0.21760000000000446
+surfcore,RAM ranking,391,0.23120000000000118
+surfcore,RAM ranking,392,0.19530000000000314
+surfcore,RAM ranking,393,0.18729999999999336
+surfcore,RAM ranking,394,0.2149000000000001
+surfcore,RAM ranking,395,0.26439999999999486
+surfcore,RAM ranking,396,0.1963999999999828
+surfcore,RAM ranking,397,0.19939999999999714
+surfcore,RAM ranking,398,0.3810000000000002
+surfcore,RAM ranking,399,0.24130000000002383
+surfcore,RAM ranking,400,0.19899999999998386
+surfcore,RAM ranking,401,0.19290000000000873
+surfcore,RAM ranking,402,0.19290000000000873
+surfcore,RAM ranking,403,0.30060000000000286
+surfcore,RAM ranking,404,0.20879999999999654
+surfcore,RAM ranking,405,0.2032000000000096
+surfcore,RAM ranking,406,0.32390000000000896
+surfcore,RAM ranking,407,0.24010000000001241
+surfcore,RAM ranking,408,0.23380000000000223
+surfcore,RAM ranking,409,0.20160000000001332
+surfcore,RAM ranking,410,0.1564000000000192
+surfcore,RAM ranking,411,0.18139999999999645
+surfcore,RAM ranking,412,0.17709999999999582
+surfcore,RAM ranking,413,0.3926999999999907
+surfcore,RAM ranking,414,0.19939999999999714
+surfcore,RAM ranking,415,0.15730000000002065
+surfcore,RAM ranking,416,0.17240000000001032
+surfcore,RAM ranking,417,0.15109999999998536
+surfcore,RAM ranking,418,0.23629999999999995
+surfcore,RAM ranking,419,0.21059999999999945
+surfcore,RAM ranking,420,0.16100000000000136
+surfcore,RAM ranking,421,0.17189999999999372
+surfcore,RAM ranking,422,0.2501000000000033
+surfcore,RAM ranking,423,0.21129999999999427
+surfcore,RAM ranking,424,0.1728999999999985
+surfcore,RAM ranking,425,0.17560000000000286
+surfcore,RAM ranking,426,0.2506999999999948
+surfcore,RAM ranking,427,0.19759999999999422
+surfcore,RAM ranking,428,0.1910000000000025
+surfcore,RAM ranking,429,0.2050999999999874
+surfcore,RAM ranking,430,0.18129999999999313
+surfcore,RAM ranking,431,0.18559999999999377
+surfcore,RAM ranking,432,0.1799000000000035
+surfcore,RAM ranking,433,0.33610000000001605
+surfcore,RAM ranking,434,0.1793999999999869
+surfcore,RAM ranking,435,0.1617000000000246
+surfcore,RAM ranking,436,0.1893000000000029
+surfcore,RAM ranking,437,0.161200000000008
+surfcore,RAM ranking,438,0.17700000000002092
+surfcore,RAM ranking,439,0.19220000000001392
+surfcore,RAM ranking,440,0.15430000000000632
+surfcore,RAM ranking,441,0.16540000000000532
+surfcore,RAM ranking,442,0.17310000000000514
+surfcore,RAM ranking,443,0.25
+surfcore,RAM ranking,444,0.17560000000000286
+surfcore,RAM ranking,445,0.1525999999999783
+surfcore,RAM ranking,446,0.18780000000000996
+surfcore,RAM ranking,447,0.1910000000000025
+surfcore,RAM ranking,448,0.17500000000001137
+surfcore,RAM ranking,449,0.16280000000000427
+surfcore,RAM ranking,450,0.17709999999999582
+surfcore,RAM ranking,451,0.1821000000000197
+surfcore,RAM ranking,452,0.1634999999999991
+surfcore,RAM ranking,453,0.160000000000025
+surfcore,RAM ranking,454,0.1699000000000126
+surfcore,RAM ranking,455,0.15709999999998558
+surfcore,RAM ranking,456,0.20429999999998927
+surfcore,RAM ranking,457,0.1675999999999931
+surfcore,RAM ranking,458,0.3141999999999996
+surfcore,RAM ranking,459,0.18050000000002342
+surfcore,RAM ranking,460,0.17189999999999372
+surfcore,RAM ranking,461,0.17980000000000018
+surfcore,RAM ranking,462,0.1571999999999889
+surfcore,RAM ranking,463,0.16560000000001196
+surfcore,RAM ranking,464,0.2867999999999995
+surfcore,RAM ranking,465,0.1891999999999996
+surfcore,RAM ranking,466,0.19769999999999754
+surfcore,RAM ranking,467,0.2436999999999898
+surfcore,RAM ranking,468,0.1453000000000202
+surfcore,RAM ranking,469,0.16320000000001755
+surfcore,RAM ranking,470,0.19700000000000273
+surfcore,RAM ranking,471,0.2411999999999921
+surfcore,RAM ranking,472,0.2044999999999959
+surfcore,RAM ranking,473,0.1910999999999774
+surfcore,RAM ranking,474,0.172300000000007
+surfcore,RAM ranking,475,0.17489999999997963
+surfcore,RAM ranking,476,0.16610000000000014
+surfcore,RAM ranking,477,0.2529999999999859
+surfcore,RAM ranking,478,0.18899999999999295
+surfcore,RAM ranking,479,0.1547999999999945
+surfcore,RAM ranking,480,0.1519999999999868
+surfcore,RAM ranking,481,0.1676999999999964
+surfcore,RAM ranking,482,0.21479999999999677
+surfcore,RAM ranking,483,0.19799999999997908
+surfcore,RAM ranking,484,0.20150000000001
+surfcore,RAM ranking,485,0.19870000000000232
+surfcore,RAM ranking,486,0.27600000000001046
+surfcore,RAM ranking,487,0.19319999999999027
+surfcore,RAM ranking,488,0.2061999999999955
+surfcore,RAM ranking,489,0.2113999999999976
+surfcore,RAM ranking,490,0.21639999999999304
+surfcore,RAM ranking,491,0.23099999999999454
+surfcore,RAM ranking,492,0.206799999999987
+surfcore,RAM ranking,493,0.20839999999998327
+surfcore,RAM ranking,494,0.19020000000000437
+surfcore,RAM ranking,495,0.18379999999999086
+surfcore,RAM ranking,496,0.18180000000000973
+surfcore,RAM ranking,497,0.1821999999999946
+surfcore,RAM ranking,498,0.24209999999999354
+surfcore,RAM ranking,499,0.20939999999998804
+surfcore,RAM ranking,500,0.17140000000000555
+surfcore,RAM ranking,501,0.19460000000000832
+surfcore,RAM ranking,502,0.19299999999998363
+surfcore,RAM ranking,503,0.19580000000001974
+surfcore,RAM ranking,504,0.18410000000000082
+surfcore,RAM ranking,505,0.21030000000001792
+surfcore,RAM ranking,506,0.20649999999997704
+surfcore,RAM ranking,507,0.19429999999999836
+surfcore,RAM ranking,508,0.20359999999999445
+surfcore,RAM ranking,509,0.2043999999999926
+surfcore,read index + ranking,0,3.8690999999999747
+surfcore,read index + ranking,1,2.97290000000001
+surfcore,read index + ranking,2,2.4085000000000036
+surfcore,read index + ranking,3,2.6444000000000187
+surfcore,read index + ranking,4,2.400100000000009
+surfcore,read index + ranking,5,4.194699999999983
+surfcore,read index + ranking,6,2.6047000000000082
+surfcore,read index + ranking,7,2.286699999999996
+surfcore,read index + ranking,8,2.3079999999999927
+surfcore,read index + ranking,9,2.3393999999999835
+surfcore,read index + ranking,10,2.1761999999999944
+surfcore,read index + ranking,11,2.149600000000021
+surfcore,read index + ranking,12,2.169700000000006
+surfcore,read index + ranking,13,2.480099999999993
+surfcore,read index + ranking,14,2.2165999999999997
+surfcore,read index + ranking,15,2.602300000000014
+surfcore,read index + ranking,16,2.1103999999999985
+surfcore,read index + ranking,17,2.3408000000000015
+surfcore,read index + ranking,18,2.3899000000000115
+surfcore,read index + ranking,19,2.0616999999999734
+surfcore,read index + ranking,20,2.474000000000018
+surfcore,read index + ranking,21,2.3762000000000114
+surfcore,read index + ranking,22,2.481899999999996
+surfcore,read index + ranking,23,2.122300000000024
+surfcore,read index + ranking,24,2.167400000000015
+surfcore,read index + ranking,25,6.364500000000021
+surfcore,read index + ranking,26,3.058099999999996
+surfcore,read index + ranking,27,2.3726999999999805
+surfcore,read index + ranking,28,2.134299999999996
+surfcore,read index + ranking,29,2.068300000000022
+surfcore,read index + ranking,30,2.158299999999997
+surfcore,read index + ranking,31,2.3823999999999614
+surfcore,read index + ranking,32,2.065400000000011
+surfcore,read index + ranking,33,2.1673999999999864
+surfcore,read index + ranking,34,2.1270000000000095
+surfcore,read index + ranking,35,2.1096999999999753
+surfcore,read index + ranking,36,1.8476
+surfcore,read index + ranking,37,2.210299999999961
+surfcore,read index + ranking,38,2.245200000000011
+surfcore,read index + ranking,39,2.1580999999999904
+surfcore,read index + ranking,40,2.0014000000000465
+surfcore,read index + ranking,41,2.22890000000001
+surfcore,read index + ranking,42,2.2872999999999593
+surfcore,read index + ranking,43,2.0984000000000265
+surfcore,read index + ranking,44,2.109700000000032
+surfcore,read index + ranking,45,2.1048999999999864
+surfcore,read index + ranking,46,2.6679000000000315
+surfcore,read index + ranking,47,2.323000000000036
+surfcore,read index + ranking,48,2.4226999999999634
+surfcore,read index + ranking,49,2.094099999999969
+surfcore,read index + ranking,50,6.458300000000008
+surfcore,read index + ranking,51,3.5347999999999615
+surfcore,read index + ranking,52,2.6440999999999804
+surfcore,read index + ranking,53,2.651300000000049
+surfcore,read index + ranking,54,2.344000000000051
+surfcore,read index + ranking,55,2.284500000000037
+surfcore,read index + ranking,56,2.4284000000000106
+surfcore,read index + ranking,57,2.4354999999999905
+surfcore,read index + ranking,58,2.296199999999999
+surfcore,read index + ranking,59,2.186800000000005
+surfcore,read index + ranking,60,2.2590999999999894
+surfcore,read index + ranking,61,2.065399999999954
+surfcore,read index + ranking,62,2.259299999999996
+surfcore,read index + ranking,63,2.328199999999981
+surfcore,read index + ranking,64,2.0650999999999726
+surfcore,read index + ranking,65,2.1188999999999965
+surfcore,read index + ranking,66,2.369000000000028
+surfcore,read index + ranking,67,2.27759999999995
+surfcore,read index + ranking,68,2.1055999999999813
+surfcore,read index + ranking,69,2.1288000000000125
+surfcore,read index + ranking,70,2.142500000000041
+surfcore,read index + ranking,71,2.101100000000031
+surfcore,read index + ranking,72,1.9617000000000075
+surfcore,read index + ranking,73,2.199800000000039
+surfcore,read index + ranking,74,2.3648999999999774
+surfcore,read index + ranking,75,2.2175000000000296
+surfcore,read index + ranking,76,2.156599999999969
+surfcore,read index + ranking,77,6.937700000000007
+surfcore,read index + ranking,78,2.699200000000019
+surfcore,read index + ranking,79,2.3602000000000203
+surfcore,read index + ranking,80,2.5318000000000325
+surfcore,read index + ranking,81,2.287399999999991
+surfcore,read index + ranking,82,2.274400000000014
+surfcore,read index + ranking,83,2.3461000000000354
+surfcore,read index + ranking,84,2.2968999999999937
+surfcore,read index + ranking,85,2.3648000000000025
+surfcore,read index + ranking,86,2.513500000000022
+surfcore,read index + ranking,87,2.4230999999999767
+surfcore,read index + ranking,88,2.184000000000026
+surfcore,read index + ranking,89,2.334500000000048
+surfcore,read index + ranking,90,2.217899999999986
+surfcore,read index + ranking,91,2.7819000000000074
+surfcore,read index + ranking,92,2.5002999999999815
+surfcore,read index + ranking,93,2.1875
+surfcore,read index + ranking,94,2.60329999999999
+surfcore,read index + ranking,95,5.184000000000026
+surfcore,read index + ranking,96,2.4501000000000204
+surfcore,read index + ranking,97,2.265100000000018
+surfcore,read index + ranking,98,2.379599999999982
+surfcore,read index + ranking,99,2.189199999999971
+surfcore,read index + ranking,100,2.1843000000000075
+surfcore,read index + ranking,101,2.0822000000000003
+surfcore,read index + ranking,102,2.2654999999999745
+surfcore,read index + ranking,103,2.048999999999978
+surfcore,read index + ranking,104,2.2279000000000337
+surfcore,read index + ranking,105,2.1789999999999736
+surfcore,read index + ranking,106,2.5930999999999926
+surfcore,read index + ranking,107,2.234100000000012
+surfcore,read index + ranking,108,2.0295000000000414
+surfcore,read index + ranking,109,2.0738999999999805
+surfcore,read index + ranking,110,2.4470000000000027
+surfcore,read index + ranking,111,2.4196000000000026
+surfcore,read index + ranking,112,2.199299999999994
+surfcore,read index + ranking,113,2.470799999999997
+surfcore,read index + ranking,114,2.139700000000005
+surfcore,read index + ranking,115,2.3039999999999736
+surfcore,read index + ranking,116,2.1417000000000144
+surfcore,read index + ranking,117,2.5504999999999995
+surfcore,read index + ranking,118,2.391300000000001
+surfcore,read index + ranking,119,2.3156000000000176
+surfcore,read index + ranking,120,5.569900000000018
+surfcore,read index + ranking,121,3.547799999999995
+surfcore,read index + ranking,122,2.8384000000000356
+surfcore,read index + ranking,123,2.3437000000000126
+surfcore,read index + ranking,124,2.200800000000015
+surfcore,read index + ranking,125,2.4320000000000164
+surfcore,read index + ranking,126,2.3331000000000017
+surfcore,read index + ranking,127,2.1247999999999934
+surfcore,read index + ranking,128,2.2694000000000187
+surfcore,read index + ranking,129,2.43689999999998
+surfcore,read index + ranking,130,2.285599999999988
+surfcore,read index + ranking,131,2.098799999999983
+surfcore,read index + ranking,132,2.268099999999947
+surfcore,read index + ranking,133,2.1865000000000236
+surfcore,read index + ranking,134,2.2790999999999713
+surfcore,read index + ranking,135,2.291500000000042
+surfcore,read index + ranking,136,2.3512000000000626
+surfcore,read index + ranking,137,2.2531999999999925
+surfcore,read index + ranking,138,2.2817999999999756
+surfcore,read index + ranking,139,2.0898999999999432
+surfcore,read index + ranking,140,2.499500000000012
+surfcore,read index + ranking,141,2.3828999999999496
+surfcore,read index + ranking,142,3.1405999999999494
+surfcore,read index + ranking,143,2.6435000000000173
+surfcore,read index + ranking,144,2.123299999999972
+surfcore,read index + ranking,145,2.2497999999999365
+surfcore,read index + ranking,146,2.0993000000000848
+surfcore,read index + ranking,147,4.841000000000008
+surfcore,read index + ranking,148,2.3414000000000215
+surfcore,read index + ranking,149,2.315399999999954
+surfcore,read index + ranking,150,2.1644000000000005
+surfcore,read index + ranking,151,2.139599999999973
+surfcore,read index + ranking,152,2.0965000000001055
+surfcore,read index + ranking,153,2.241800000000012
+surfcore,read index + ranking,154,2.292500000000018
+surfcore,read index + ranking,155,2.2203000000000657
+surfcore,read index + ranking,156,2.0877000000000407
+surfcore,read index + ranking,157,2.2485000000000355
+surfcore,read index + ranking,158,2.193399999999997
+surfcore,read index + ranking,159,2.3950999999999567
+surfcore,read index + ranking,160,2.359299999999962
+surfcore,read index + ranking,161,2.5085000000000264
+surfcore,read index + ranking,162,2.277300000000082
+surfcore,read index + ranking,163,2.3573000000000093
+surfcore,read index + ranking,164,2.3958999999999833
+surfcore,read index + ranking,165,2.143100000000004
+surfcore,read index + ranking,166,2.1573999999999387
+surfcore,read index + ranking,167,2.2101000000000113
+surfcore,read index + ranking,168,2.4896999999999707
+surfcore,read index + ranking,169,2.3256000000000085
+surfcore,read index + ranking,170,2.1906000000000176
+surfcore,read index + ranking,171,2.1516000000000304
+surfcore,read index + ranking,172,3.820699999999988
+surfcore,read index + ranking,173,3.545199999999909
+surfcore,read index + ranking,174,2.2719999999999345
+surfcore,read index + ranking,175,2.0529999999999973
+surfcore,read index + ranking,176,2.2725000000000364
+surfcore,read index + ranking,177,2.238299999999981
+surfcore,read index + ranking,178,2.1580000000000155
+surfcore,read index + ranking,179,2.0394999999999754
+surfcore,read index + ranking,180,2.2053999999999405
+surfcore,read index + ranking,181,2.357499999999959
+surfcore,read index + ranking,182,2.2474999999999454
+surfcore,read index + ranking,183,2.178099999999972
+surfcore,read index + ranking,184,2.1993999999999687
+surfcore,read index + ranking,185,2.2077000000000453
+surfcore,read index + ranking,186,2.061800000000062
+surfcore,read index + ranking,187,2.4266999999999825
+surfcore,read index + ranking,188,3.014499999999998
+surfcore,read index + ranking,189,2.8677000000000135
+surfcore,read index + ranking,190,2.390899999999988
+surfcore,read index + ranking,191,2.195699999999988
+surfcore,read index + ranking,192,2.106400000000008
+surfcore,read index + ranking,193,2.0208000000000084
+surfcore,read index + ranking,194,2.3361000000001013
+surfcore,read index + ranking,195,2.9991999999999734
+surfcore,read index + ranking,196,3.754099999999994
+surfcore,read index + ranking,197,2.1864000000000487
+surfcore,read index + ranking,198,2.1415000000000646
+surfcore,read index + ranking,199,2.197599999999966
+surfcore,read index + ranking,200,2.365899999999897
+surfcore,read index + ranking,201,2.111499999999978
+surfcore,read index + ranking,202,2.260499999999979
+surfcore,read index + ranking,203,2.115599999999972
+surfcore,read index + ranking,204,2.156900000000064
+surfcore,read index + ranking,205,2.3491000000000213
+surfcore,read index + ranking,206,2.1420000000000528
+surfcore,read index + ranking,207,2.1832999999999174
+surfcore,read index + ranking,208,2.16719999999998
+surfcore,read index + ranking,209,2.0124000000000706
+surfcore,read index + ranking,210,2.310799999999972
+surfcore,read index + ranking,211,2.017599999999902
+surfcore,read index + ranking,212,2.2857999999999947
+surfcore,read index + ranking,213,2.1918000000000575
+surfcore,read index + ranking,214,2.4481000000000677
+surfcore,read index + ranking,215,2.4314000000000533
+surfcore,read index + ranking,216,2.2893000000000256
+surfcore,read index + ranking,217,2.588100000000054
+surfcore,read index + ranking,218,2.203899999999976
+surfcore,read index + ranking,219,2.1689999999999827
+surfcore,read index + ranking,220,4.627799999999979
+surfcore,read index + ranking,221,2.6014000000000124
+surfcore,read index + ranking,222,2.200399999999945
+surfcore,read index + ranking,223,2.1864000000000487
+surfcore,read index + ranking,224,2.1733999999999014
+surfcore,read index + ranking,225,2.1544999999999845
+surfcore,read index + ranking,226,2.2981999999999516
+surfcore,read index + ranking,227,2.233699999999999
+surfcore,read index + ranking,228,2.068200000000047
+surfcore,read index + ranking,229,2.095199999999977
+surfcore,read index + ranking,230,2.0699999999999363
+surfcore,read index + ranking,231,2.0780999999999494
+surfcore,read index + ranking,232,2.0079999999999245
+surfcore,read index + ranking,233,2.0317000000000007
+surfcore,read index + ranking,234,2.3408000000000584
+surfcore,read index + ranking,235,2.121099999999956
+surfcore,read index + ranking,236,2.323599999999942
+surfcore,read index + ranking,237,2.322599999999966
+surfcore,read index + ranking,238,2.0548
+surfcore,read index + ranking,239,2.3111000000000104
+surfcore,read index + ranking,240,2.244399999999928
+surfcore,read index + ranking,241,2.40319999999997
+surfcore,read index + ranking,242,2.1534000000000333
+surfcore,read index + ranking,243,2.0801999999999907
+surfcore,read index + ranking,244,2.247100000000046
+surfcore,read index + ranking,245,3.042599999999993
+surfcore,read index + ranking,246,4.323599999999942
+surfcore,read index + ranking,247,2.656600000000026
+surfcore,read index + ranking,248,2.393199999999979
+surfcore,read index + ranking,249,2.0423999999999296
+surfcore,read index + ranking,250,2.2128999999999905
+surfcore,read index + ranking,251,2.1662000000000035
+surfcore,read index + ranking,252,2.2035000000000764
+surfcore,read index + ranking,253,2.1246000000001004
+surfcore,read index + ranking,254,2.6626999999999725
+surfcore,read index + ranking,255,2.1920000000000073
+surfcore,read index + ranking,256,2.2215999999999667
+surfcore,read index + ranking,257,2.0026000000000295
+surfcore,read index + ranking,258,2.355199999999968
+surfcore,read index + ranking,259,2.233600000000024
+surfcore,read index + ranking,260,2.245800000000031
+surfcore,read index + ranking,261,2.219699999999989
+surfcore,read index + ranking,262,2.2841000000000804
+surfcore,read index + ranking,263,2.12519999999995
+surfcore,read index + ranking,264,2.0904999999999063
+surfcore,read index + ranking,265,2.201999999999998
+surfcore,read index + ranking,266,2.161799999999971
+surfcore,read index + ranking,267,2.1772000000000844
+surfcore,read index + ranking,268,2.185100000000034
+surfcore,read index + ranking,269,2.211300000000051
+surfcore,read index + ranking,270,2.1894999999999527
+surfcore,read index + ranking,271,4.647299999999973
+surfcore,read index + ranking,272,2.3593000000000757
+surfcore,read index + ranking,273,2.334600000000023
+surfcore,read index + ranking,274,2.270399999999995
+surfcore,read index + ranking,275,2.224900000000048
+surfcore,read index + ranking,276,2.1504999999999654
+surfcore,read index + ranking,277,2.136000000000081
+surfcore,read index + ranking,278,2.0972000000000435
+surfcore,read index + ranking,279,2.219100000000026
+surfcore,read index + ranking,280,2.391900000000078
+surfcore,read index + ranking,281,3.099499999999921
+surfcore,read index + ranking,282,2.3782999999999674
+surfcore,read index + ranking,283,2.283399999999915
+surfcore,read index + ranking,284,2.312000000000012
+surfcore,read index + ranking,285,2.195500000000038
+surfcore,read index + ranking,286,2.500499999999988
+surfcore,read index + ranking,287,2.444500000000062
+surfcore,read index + ranking,288,3.243600000000015
+surfcore,read index + ranking,289,2.383699999999976
+surfcore,read index + ranking,290,2.1282999999999674
+surfcore,read index + ranking,291,2.266399999999976
+surfcore,read index + ranking,292,2.1785999999999603
+surfcore,read index + ranking,293,2.3432999999999993
+surfcore,read index + ranking,294,4.4027999999999565
+surfcore,read index + ranking,295,2.539100000000076
+surfcore,read index + ranking,296,2.268100000000004
+surfcore,read index + ranking,297,2.1982999999999038
+surfcore,read index + ranking,298,2.21449999999993
+surfcore,read index + ranking,299,2.5884999999999536
+surfcore,read index + ranking,300,2.1666000000000167
+surfcore,read index + ranking,301,2.281900000000064
+surfcore,read index + ranking,302,2.265100000000075
+surfcore,read index + ranking,303,2.264599999999973
+surfcore,read index + ranking,304,2.1515000000000555
+surfcore,read index + ranking,305,3.8361999999999625
+surfcore,read index + ranking,306,2.284400000000005
+surfcore,read index + ranking,307,2.165399999999977
+surfcore,read index + ranking,308,2.294599999999946
+surfcore,read index + ranking,309,1.9621999999999389
+surfcore,read index + ranking,310,2.189300000000003
+surfcore,read index + ranking,311,2.009700000000066
+surfcore,read index + ranking,312,2.589800000000082
+surfcore,read index + ranking,313,2.296799999999962
+surfcore,read index + ranking,314,2.522000000000048
+surfcore,read index + ranking,315,2.2323000000000093
+surfcore,read index + ranking,316,2.318499999999972
+surfcore,read index + ranking,317,2.1814000000000533
+surfcore,read index + ranking,318,3.0376999999999725
+surfcore,read index + ranking,319,2.6812999999999647
+surfcore,read index + ranking,320,2.460900000000038
+surfcore,read index + ranking,321,2.1364999999999554
+surfcore,read index + ranking,322,2.157899999999927
+surfcore,read index + ranking,323,2.2034999999999627
+surfcore,read index + ranking,324,2.2379999999999427
+surfcore,read index + ranking,325,2.109499999999912
+surfcore,read index + ranking,326,2.373100000000022
+surfcore,read index + ranking,327,2.7291000000000167
+surfcore,read index + ranking,328,2.070600000000013
+surfcore,read index + ranking,329,2.3689000000000533
+surfcore,read index + ranking,330,2.690499999999929
+surfcore,read index + ranking,331,2.3759000000000015
+surfcore,read index + ranking,332,2.3793000000000575
+surfcore,read index + ranking,333,2.2883000000000493
+surfcore,read index + ranking,334,2.2250000000000227
+surfcore,read index + ranking,335,2.1055000000000064
+surfcore,read index + ranking,336,2.4039999999999964
+surfcore,read index + ranking,337,2.3117999999999483
+surfcore,read index + ranking,338,2.1382999999999583
+surfcore,read index + ranking,339,2.2017999999999347
+surfcore,read index + ranking,340,2.4747999999999593
+surfcore,read index + ranking,341,2.197599999999966
+surfcore,read index + ranking,342,2.3077999999999292
+surfcore,read index + ranking,343,2.0628000000000384
+surfcore,read index + ranking,344,7.369100000000003
+surfcore,read index + ranking,345,2.5907999999999447
+surfcore,read index + ranking,346,2.352999999999952
+surfcore,read index + ranking,347,2.317800000000034
+surfcore,read index + ranking,348,2.150899999999865
+surfcore,read index + ranking,349,2.266800000000103
+surfcore,read index + ranking,350,2.1292000000000826
+surfcore,read index + ranking,351,2.3532000000000153
+surfcore,read index + ranking,352,2.172700000000077
+surfcore,read index + ranking,353,2.1434999999999036
+surfcore,read index + ranking,354,2.215900000000147
+surfcore,read index + ranking,355,2.1142999999999574
+surfcore,read index + ranking,356,2.082200000000057
+surfcore,read index + ranking,357,2.2889000000000124
+surfcore,read index + ranking,358,2.2227000000000317
+surfcore,read index + ranking,359,2.2050000000001546
+surfcore,read index + ranking,360,2.2148999999999432
+surfcore,read index + ranking,361,2.00220000000013
+surfcore,read index + ranking,362,2.230199999999968
+surfcore,read index + ranking,363,2.007799999999861
+surfcore,read index + ranking,364,2.2390000000000327
+surfcore,read index + ranking,365,2.0738000000001193
+surfcore,read index + ranking,366,2.286000000000058
+surfcore,read index + ranking,367,2.026399999999967
+surfcore,read index + ranking,368,2.2263000000000375
+surfcore,read index + ranking,369,2.228599999999915
+surfcore,read index + ranking,370,2.315499999999929
+surfcore,read index + ranking,371,2.181799999999839
+surfcore,read index + ranking,372,2.175299999999879
+surfcore,read index + ranking,373,2.514199999999846
+surfcore,read index + ranking,374,2.5184999999999036
+surfcore,read index + ranking,375,2.5436999999999443
+surfcore,read index + ranking,376,2.2194999999999254
+surfcore,read index + ranking,377,2.457800000000134
+surfcore,read index + ranking,378,2.2619999999999436
+surfcore,read index + ranking,379,2.42470000000003
+surfcore,read index + ranking,380,2.442099999999982
+surfcore,read index + ranking,381,2.701300000000174
+surfcore,read index + ranking,382,4.503200000000106
+surfcore,read index + ranking,383,3.6993999999999687
+surfcore,read index + ranking,384,2.42450000000008
+surfcore,read index + ranking,385,2.862999999999829
+surfcore,read index + ranking,386,2.363399999999956
+surfcore,read index + ranking,387,2.312299999999823
+surfcore,read index + ranking,388,2.1514000000001943
+surfcore,read index + ranking,389,2.287599999999884
+surfcore,read index + ranking,390,2.1847000000000207
+surfcore,read index + ranking,391,2.442500000000109
+surfcore,read index + ranking,392,2.1487999999999374
+surfcore,read index + ranking,393,2.328999999999951
+surfcore,read index + ranking,394,2.3262999999999465
+surfcore,read index + ranking,395,2.414199999999937
+surfcore,read index + ranking,396,2.22180000000003
+surfcore,read index + ranking,397,2.1799000000000888
+surfcore,read index + ranking,398,2.31230000000005
+surfcore,read index + ranking,399,2.14670000000001
+surfcore,read index + ranking,400,2.420900000000074
+surfcore,read index + ranking,401,2.174600000000055
+surfcore,read index + ranking,402,2.457499999999982
+surfcore,read index + ranking,403,2.1805000000001655
+surfcore,read index + ranking,404,2.216999999999871
+surfcore,read index + ranking,405,2.5325000000000273
+surfcore,read index + ranking,406,2.4145999999998367
+surfcore,read index + ranking,407,2.419499999999971
+surfcore,read index + ranking,408,2.297900000000027
+surfcore,read index + ranking,409,2.315499999999929
+surfcore,read index + ranking,410,2.2574999999999363
+surfcore,read index + ranking,411,3.4266999999999825
+surfcore,read index + ranking,412,2.7361000000000786
+surfcore,read index + ranking,413,2.707499999999982
+surfcore,read index + ranking,414,2.4238000000000284
+surfcore,read index + ranking,415,2.216999999999871
+surfcore,read index + ranking,416,2.1072999999998956
+surfcore,read index + ranking,417,2.366899999999987
+surfcore,read index + ranking,418,2.4164999999998145
+surfcore,read index + ranking,419,2.6200999999998658
+surfcore,read index + ranking,420,5.975099999999884
+surfcore,read index + ranking,421,2.6405999999999494
+surfcore,read index + ranking,422,2.2132000000001426
+surfcore,read index + ranking,423,2.1317999999998847
+surfcore,read index + ranking,424,2.1118999999998778
+surfcore,read index + ranking,425,2.2390000000000327
+surfcore,read index + ranking,426,2.1307999999999083
+surfcore,read index + ranking,427,2.174600000000055
+surfcore,read index + ranking,428,2.119699999999966
+surfcore,read index + ranking,429,2.1368999999999687
+surfcore,read index + ranking,430,2.4494999999999436
+surfcore,read index + ranking,431,2.2124999999998636
+surfcore,read index + ranking,432,2.3057000000001153
+surfcore,read index + ranking,433,2.0499999999999545
+surfcore,read index + ranking,434,2.1770000000001346
+surfcore,read index + ranking,435,2.1458000000000084
+surfcore,read index + ranking,436,2.1717000000001008
+surfcore,read index + ranking,437,2.1842999999998938
+surfcore,read index + ranking,438,2.5413999999998396
+surfcore,read index + ranking,439,2.4231999999999516
+surfcore,read index + ranking,440,2.2590000000000146
+surfcore,read index + ranking,441,2.241999999999962
+surfcore,read index + ranking,442,2.1698999999998705
+surfcore,read index + ranking,443,2.109100000000126
+surfcore,read index + ranking,444,2.3958999999999833
+surfcore,read index + ranking,445,2.2527000000000044
+surfcore,read index + ranking,446,2.1816999999998643
+surfcore,read index + ranking,447,2.278400000000147
+surfcore,read index + ranking,448,2.1304000000000087
+surfcore,read index + ranking,449,2.236699999999928
+surfcore,read index + ranking,450,2.074100000000044
+surfcore,read index + ranking,451,2.3133000000000266
+surfcore,read index + ranking,452,2.2455999999999676
+surfcore,read index + ranking,453,2.2852000000000317
+surfcore,read index + ranking,454,2.3658000000000357
+surfcore,read index + ranking,455,2.2322999999998956
+surfcore,read index + ranking,456,2.352500000000191
+surfcore,read index + ranking,457,2.798799999999801
+surfcore,read index + ranking,458,6.736699999999928
+surfcore,read index + ranking,459,2.5451000000000477
+surfcore,read index + ranking,460,2.1426000000001295
+surfcore,read index + ranking,461,2.2853000000000065
+surfcore,read index + ranking,462,2.5038999999999305
+surfcore,read index + ranking,463,2.3021000000001095
+surfcore,read index + ranking,464,2.266399999999976
+surfcore,read index + ranking,465,2.5330999999998767
+surfcore,read index + ranking,466,2.227400000000216
+surfcore,read index + ranking,467,2.2092999999999847
+surfcore,read index + ranking,468,2.238499999999931
+surfcore,read index + ranking,469,2.90079999999989
+surfcore,read index + ranking,470,2.233600000000024
+surfcore,read index + ranking,471,2.0428000000001703
+surfcore,read index + ranking,472,2.36850000000004
+surfcore,read index + ranking,473,2.0829999999998563
+surfcore,read index + ranking,474,2.374900000000025
+surfcore,read index + ranking,475,2.155999999999949
+surfcore,read index + ranking,476,2.547399999999925
+surfcore,read index + ranking,477,2.321999999999889
+surfcore,read index + ranking,478,2.210600000000113
+surfcore,read index + ranking,479,2.287800000000061
+surfcore,read index + ranking,480,2.266300000000001
+surfcore,read index + ranking,481,2.2527000000000044
+surfcore,read index + ranking,482,2.266200000000026
+surfcore,read index + ranking,483,2.1799000000000888
+surfcore,read index + ranking,484,2.154600000000073
+surfcore,read index + ranking,485,2.3934999999999036
+surfcore,read index + ranking,486,2.1216000000001713
+surfcore,read index + ranking,487,2.5122999999998683
+surfcore,read index + ranking,488,2.3295999999998003
+surfcore,read index + ranking,489,2.2526000000000295
+surfcore,read index + ranking,490,2.477700000000141
+surfcore,read index + ranking,491,2.133399999999938
+surfcore,read index + ranking,492,2.248800000000074
+surfcore,read index + ranking,493,2.3099999999999454
+surfcore,read index + ranking,494,2.6621000000000095
+surfcore,read index + ranking,495,7.224300000000085
+surfcore,read index + ranking,496,3.1666999999999916
+surfcore,read index + ranking,497,2.3019999999999072
+surfcore,read index + ranking,498,2.2895999999998367
+surfcore,read index + ranking,499,2.1277000000000044
+surfcore,read index + ranking,500,2.228700000000117
+surfcore,read index + ranking,501,2.320299999999861
+surfcore,read index + ranking,502,2.537599999999884
+surfcore,read index + ranking,503,2.3798000000001593
+surfcore,read index + ranking,504,2.599999999999909
+surfcore,read index + ranking,505,2.316899999999805
+surfcore,read index + ranking,506,2.1716999999998734
+surfcore,read index + ranking,507,2.403099999999995
+surfcore,read index + ranking,508,2.3872999999998683
+surfcore,read index + ranking,509,2.3251999999999953

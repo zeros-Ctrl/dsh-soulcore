@@ -1,5 +1,5 @@
 """
-emotion.py —— 独立人格的情绪动力学（单维：效价 valence，0=悲伤 1=开心，两端不可达）
+emotion.py —— 独立人格的情绪动力学（效价 valence + 独立唤醒度 arousal）
 
 核心思想：事件不直接改"情绪值"，而是改"情绪想去的地方"（目标/设定点 r），
 情绪值 x 由一个 PID 调节器 + 情绪惯性 去平滑地追踪 r，再加一道限速保险。
@@ -39,22 +39,23 @@ class EventSpec:
     spread: float = 0.45  # 对数正态随机性：同一事件每次反应强度不同
     slow_frac: float = 0.3  # 多少比例进入慢通道（记仇/回味得更久）
     social: bool = True   # 是否算一次"有人陪我"（会重置孤独计时）
+    arousal: float = 0.0  # 唤醒驱动：正=更激动，负=更平静；不是情绪好坏
 
 
 EVENTS: dict[str, EventSpec] = {
     "chat":            EventSpec(+0.06, 0.5, 0.10),
-    "praise":          EventSpec(+0.80, 0.40, 0.30),
-    "scold":           EventSpec(-1.20, 0.45, 0.40),
-    "apology":         EventSpec(+0.70, 0.40, 0.30),
-    "gift":            EventSpec(+1.00, 0.35, 0.50),
-    "success":         EventSpec(+1.10, 0.30, 0.50),
-    "stranger_insult": EventSpec(-0.50, 0.60, 0.15, social=False),
-    "balance_low":     EventSpec(-0.40, 0.50, 0.50, social=False),
-    "balance_out":     EventSpec(-0.70, 0.50, 0.60, social=False),
-    "recharge":        EventSpec(+0.50, 0.40, 0.50, social=False),
+    "praise":          EventSpec(+0.80, 0.40, 0.30, arousal=0.30),
+    "scold":           EventSpec(-1.20, 0.45, 0.40, arousal=0.45),
+    "apology":         EventSpec(+0.70, 0.40, 0.30, arousal=-0.15),
+    "gift":            EventSpec(+1.00, 0.35, 0.50, arousal=0.40),
+    "success":         EventSpec(+1.10, 0.30, 0.50, arousal=0.50),
+    "stranger_insult": EventSpec(-0.50, 0.60, 0.15, social=False, arousal=0.25),
+    "balance_low":     EventSpec(-0.40, 0.50, 0.50, social=False, arousal=0.10),
+    "balance_out":     EventSpec(-0.70, 0.50, 0.60, social=False, arousal=0.25),
+    "recharge":        EventSpec(+0.50, 0.40, 0.50, social=False, arousal=-0.10),
     # 主动聊天的反馈：主动找他，他回了 / 没回
-    "responded":       EventSpec(+0.35, 0.40, 0.30),
-    "ignored":         EventSpec(-0.30, 0.50, 0.40, social=False),
+    "responded":       EventSpec(+0.35, 0.40, 0.30, arousal=0.15),
+    "ignored":         EventSpec(-0.30, 0.50, 0.40, social=False, arousal=-0.15),
 }
 
 EVENT_CN = {
@@ -97,6 +98,11 @@ class Params:
     # 性格漂移（长期经历缓慢改变基线，同时被先天基线拉回）
     tau_trait: float = 20160.0   # 14 天
     tau_innate: float = 43200.0  # 30 天
+    # 独立唤醒度：本地状态，不增加模型调用；旧配置自动使用以下默认值
+    arousal_baseline: float = 0.35
+    tau_arousal_drive: float = 45.0
+    tau_arousal: float = 20.0
+    arousal_max_rate: float = 0.015
 
 
 class Emotion:
@@ -120,6 +126,8 @@ class Emotion:
         self.v = 0.0
         self.hab: dict[str, tuple[float, float]] = {}
         self.recent: list[tuple[str, float, float]] = []
+        self.a = max(0.0, min(1.0, self.p.arousal_baseline))
+        self.arousal_drive = 0.0
 
     # ---------- 对外接口 ----------
     @property
@@ -130,12 +138,18 @@ class Emotion:
     def target(self) -> float:
         return sigmoid(self.rf)
 
+    @property
+    def arousal(self) -> float:
+        """0=平静/低活跃，1=激动；与愉快度独立。"""
+        return self.a
+
     def advance(self, t: float) -> None:
         """推进到时刻 t（懒计算：插件不需要后台定时器，收到消息时调用一次即可）"""
         while self.t < t - 1e-9:
             self._step(min(1.0, t - self.t))
 
-    def event(self, name: str, t: float | None = None, amp: float | None = None) -> float:
+    def event(self, name: str, t: float | None = None, amp: float | None = None,
+              *, arousal: float | None = None) -> float:
         """触发事件，返回本次实际冲击幅度（随机抽样后）"""
         if t is not None:
             self.advance(t)
@@ -150,6 +164,12 @@ class Emotion:
         self.hab[name] = (h + 1.0, self.t)
         self.d_fast += A * (1 - spec.slow_frac)
         self.d_slow += A * spec.slow_frac
+        if arousal is None:
+            arousal = spec.arousal * min(2.0, abs(A) / max(0.06, abs(spec.amp)))
+        else:
+            arousal /= 1.0 + p.hab_k * h
+        # 只改驱动；此刻a与mood不跳变，下一时间段才开始平滑变化。
+        self.arousal_drive = max(-2.0, min(2.0, self.arousal_drive + arousal))
         if spec.social:
             self.last_social = self.t
         self.recent.append((name, A, self.t))
@@ -165,6 +185,11 @@ class Emotion:
     # ---------- 动力学 ----------
     def _step(self, dt: float) -> None:
         p = self.p
+        arousal_target = max(0.0, min(1.0, p.arousal_baseline + 0.65 * math.tanh(self.arousal_drive)))
+        da = (arousal_target - self.a) * (1 - math.exp(-dt / max(1e-6, p.tau_arousal)))
+        da_limit = max(0.0, p.arousal_max_rate) * dt
+        self.a = max(0.0, min(1.0, self.a + max(-da_limit, min(da_limit, da))))
+        self.arousal_drive *= math.exp(-dt / max(1e-6, p.tau_arousal_drive))
         self.d_fast *= math.exp(-dt / p.tau_fast)
         self.d_slow *= math.exp(-dt / p.tau_slow)
         if self.t - self.last_social > p.lonely_grace:
@@ -242,14 +267,23 @@ class Emotion:
     def to_dict(self) -> dict:
         d = {k: v for k, v in self.__dict__.items() if k not in ("p", "rng_noise", "rng_event")}
         d["params"] = asdict(self.p)
+        d["rng_noise_state"] = self.rng_noise.getstate()
+        d["rng_event_state"] = self.rng_event.getstate()
         return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Emotion":
-        obj = cls(Params(**d["params"]))
+        obj = cls(Params(**d.get("params", {})))
         for k, v in d.items():
-            if k != "params":
+            if k not in ("params", "rng_noise_state", "rng_event_state"):
                 setattr(obj, k, v)
         obj.hab = {k: tuple(v) for k, v in obj.hab.items()}
         obj.recent = [tuple(e) for e in obj.recent]
+        obj.a = max(0.0, min(1.0, float(obj.a)))
+        obj.arousal_drive = max(-2.0, min(2.0, float(obj.arousal_drive)))
+        def tuples(value):
+            return tuple(tuples(v) for v in value) if isinstance(value, (list, tuple)) else value
+        for key, rng in (("rng_noise_state", obj.rng_noise), ("rng_event_state", obj.rng_event)):
+            if key in d:
+                rng.setstate(tuples(d[key]))
         return obj

@@ -16,8 +16,9 @@ from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from soulcore.cc_hook import (last_assistant_text, make_event, project_name, transcript_reply)
-from soulcore.client import Backend, resolve_home
+from soulcore.client import Backend, pid_alive, resolve_home
 from soulcore.config import load_config
+from soulcore.lockfile import InstanceLock
 
 CORE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUN_PY = os.path.join(CORE, "run.py")
@@ -27,9 +28,9 @@ FIX = os.path.join(CORE, "tests", "fixtures")
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        # Cleanups run in reverse registration order, including after failed setUp.
+        # A subclass's backend must finish shutting down before its home is removed.
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
 
 
 class TranscriptTest(Base):
@@ -130,10 +131,25 @@ class CcHookTest(Base):
         with patch.dict(os.environ, {"SOULCORE_HOME": self.home}):
             resolve_home()
         self.backend = Backend(home=self.home, mock=True)
-        self.backend.ensure(start=True, wait_s=20)
-        self.addCleanup(self.backend.shutdown)
+        self.addCleanup(self.stop_backend)
+        found = self.backend.ensure(start=True, wait_s=20)
+        log_path = os.path.join(self.home, "logs", "serve.log")
+        startup_log = ""
+        if found is None and os.path.isfile(log_path):
+            with open(log_path, encoding="utf-8", errors="replace") as f:
+                startup_log = f.read()[-4000:]
+        self.assertIsNotNone(found, f"mock 后端没有启动：{log_path}\n{startup_log}")
         self.cwd = os.path.join(self.tmp, "myrobot")
         os.makedirs(self.cwd)
+
+    def stop_backend(self):
+        info = InstanceLock.read(self.backend.lock_path) or {}
+        self.backend.shutdown()
+        pid = info.get("pid")
+        deadline = time.monotonic() + 15.0
+        while pid_alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertFalse(pid_alive(pid), f"mock 后端没有完成退出：pid={pid}")
 
     def hook(self, event, payload, home=None, stdin=None, timeout=40):
         env = {**os.environ, "SOULCORE_HOME": home or self.home,

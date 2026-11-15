@@ -1,0 +1,446 @@
+{
+  "seeds": [
+    42,
+    73,
+    101,
+    211,
+    307
+  ],
+  "retrieval": [
+    {
+      "version": "before",
+      "category": "lexical",
+      "n": 10,
+      "recall_at_5": 1,
+      "mrr": 1.0
+    },
+    {
+      "version": "before",
+      "category": "paraphrase",
+      "n": 29,
+      "recall_at_5": 1,
+      "mrr": 0.9339080459770115
+    },
+    {
+      "version": "before",
+      "category": "cross",
+      "n": 3,
+      "recall_at_5": 1,
+      "mrr": 1.0
+    },
+    {
+      "version": "before",
+      "category": "heldout",
+      "n": 15,
+      "recall_at_5": 1,
+      "mrr": 0.9666666666666667
+    },
+    {
+      "version": "before",
+      "category": "heldout_hard",
+      "n": 17,
+      "recall_at_5": 1,
+      "mrr": 1.0
+    },
+    {
+      "version": "before",
+      "category": "blind",
+      "n": 28,
+      "recall_at_5": 1,
+      "mrr": 0.9375
+    },
+    {
+      "version": "before",
+      "category": "all",
+      "n": 102,
+      "recall_at_5": 1,
+      "mrr": 0.9591503267973857
+    },
+    {
+      "version": "after",
+      "category": "lexical",
+      "n": 10,
+      "recall_at_5": 1,
+      "mrr": 1.0
+    },
+    {
+      "version": "after",
+      "category": "paraphrase",
+      "n": 29,
+      "recall_at_5": 1,
+      "mrr": 0.9339080459770115
+    },
+    {
+      "version": "after",
+      "category": "cross",
+      "n": 3,
+      "recall_at_5": 1,
+      "mrr": 1.0
+    },
+    {
+      "version": "after",
+      "category": "heldout",
+      "n": 15,
+      "recall_at_5": 1,
+      "mrr": 0.9666666666666667
+    },
+    {
+      "version": "after",
+      "category": "heldout_hard",
+      "n": 17,
+      "recall_at_5": 1,
+      "mrr": 1.0
+    },
+    {
+      "version": "after",
+      "category": "blind",
+      "n": 28,
+      "recall_at_5": 1,
+      "mrr": 0.9375
+    },
+    {
+      "version": "after",
+      "category": "all",
+      "n": 102,
+      "recall_at_5": 1,
+      "mrr": 0.9591503267973857
+    },
+    {
+      "version": "surfcore",
+      "category": "lexical",
+      "n": 10,
+      "recall_at_5": 1,
+      "mrr": 1.0
+    },
+    {
+      "version": "surfcore",
+      "category": "paraphrase",
+      "n": 29,
+      "recall_at_5": 0.8275862068965517,
+      "mrr": 0.667816091954023
+    },
+    {
+      "version": "surfcore",
+      "category": "cross",
+      "n": 3,
+      "recall_at_5": 0,
+      "mrr": 0
+    },
+    {
+      "version": "surfcore",
+      "category": "heldout",
+      "n": 15,
+      "recall_at_5": 1,
+      "mrr": 0.8333333333333334
+    },
+    {
+      "version": "surfcore",
+      "category": "heldout_hard",
+      "n": 17,
+      "recall_at_5": 0.4117647058823529,
+      "mrr": 0.3352941176470588
+    },
+    {
+      "version": "surfcore",
+      "category": "blind",
+      "n": 28,
+      "recall_at_5": 0.8571428571428571,
+      "mrr": 0.6154761904761905
+    },
+    {
+      "version": "surfcore",
+      "category": "all",
+      "n": 102,
+      "recall_at_5": 0.7843137254901961,
+      "mrr": 0.6352941176470588
+    }
+  ],
+  "longmem": {
+    "before": {
+      "turns": 1646.4,
+      "ku_ok": 1.0,
+      "ku_valid_fact_present": 1.0,
+      "ku_new_visible": 1.0,
+      "ku_stale_unlabeled": 0.0,
+      "tr_ok": 0.95,
+      "lr_ok": 1.0,
+      "ctrl_ok": 1.0,
+      "privacy_leaks": 0,
+      "extract_calls": 223.2,
+      "extract_in_chars": 496452.4,
+      "llm_calls_all": 325,
+      "inject_chars_mean": 425.9,
+      "inject_chars_phatic": 91.72,
+      "latency_ms_mean": 97.272
+    },
+    "after": {
+      "turns": 1646.4,
+      "ku_ok": 1.0,
+      "ku_valid_fact_present": 1.0,
+      "ku_new_visible": 1.0,
+      "ku_stale_unlabeled": 0.0,
+      "tr_ok": 0.95,
+      "lr_ok": 1.0,
+      "ctrl_ok": 1.0,
+      "privacy_leaks": 0,
+      "extract_calls": 224,
+      "extract_in_chars": 587170.2,
+      "llm_calls_all": 325.8,
+      "inject_chars_mean": 547.8199999999999,
+      "inject_chars_phatic": 140.72,
+      "latency_ms_mean": 112.0
+    }
+  },
+  "components": {
+    "before": {
+      "profile": {
+        "attempts": 20,
+        "model_calls": 20,
+        "input_chars": 4300
+      },
+      "project_own_visible": 10,
+      "project_other_visible": 10,
+      "project_n": 20,
+      "restart_errors": [
+        0.03364115219965702,
+        0.026714409714853615,
+        0.016765713038893404,
+        0.05904497747924853,
+        0.011774942931606525
+      ],
+      "rescue_exact_original": 0,
+      "rescue_original_n": 6,
+      "middle_constraints": 1,
+      "latency_median": 14.392500001122244,
+      "latency_p95": 23.309800017159432,
+      "appraisal": {
+        "appraisal_set.jsonl": {
+          "n": 128,
+          "accuracy": 1
+        },
+        "appraisal_heldout.jsonl": {
+          "n": 50,
+          "accuracy": 0.96
+        }
+      },
+      "task_feedback": [
+        {
+          "text": "你这个方法错了",
+          "event": "scold",
+          "about_me": true,
+          "cause": ""
+        },
+        {
+          "text": "你把配置改坏了",
+          "event": "chat",
+          "about_me": true,
+          "cause": ""
+        },
+        {
+          "text": "这个检索结果不对",
+          "event": "chat",
+          "about_me": false,
+          "cause": ""
+        },
+        {
+          "text": "这段代码太慢了",
+          "event": "chat",
+          "about_me": false,
+          "cause": ""
+        },
+        {
+          "text": "你这方法错了，你真蠢",
+          "event": "scold",
+          "about_me": true,
+          "cause": ""
+        },
+        {
+          "text": "对不起，刚才把配置改坏了",
+          "event": "apology",
+          "about_me": true,
+          "cause": ""
+        }
+      ]
+    },
+    "after": {
+      "profile": {
+        "attempts": 20,
+        "model_calls": 1,
+        "input_chars": 215
+      },
+      "project_own_visible": 20,
+      "project_other_visible": 0,
+      "project_n": 20,
+      "restart_errors": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rescue_exact_original": 6,
+      "rescue_original_n": 6,
+      "middle_constraints": 6,
+      "latency_median": 14.53219998802524,
+      "latency_p95": 22.849000000860542,
+      "appraisal": {
+        "appraisal_set.jsonl": {
+          "n": 128,
+          "accuracy": 1
+        },
+        "appraisal_heldout.jsonl": {
+          "n": 50,
+          "accuracy": 0.96
+        }
+      },
+      "task_feedback": [
+        {
+          "text": "你这个方法错了",
+          "event": "chat",
+          "about_me": false,
+          "cause": "task_feedback"
+        },
+        {
+          "text": "你把配置改坏了",
+          "event": "chat",
+          "about_me": false,
+          "cause": "task_feedback"
+        },
+        {
+          "text": "这个检索结果不对",
+          "event": "chat",
+          "about_me": false,
+          "cause": "task_feedback"
+        },
+        {
+          "text": "这段代码太慢了",
+          "event": "chat",
+          "about_me": false,
+          "cause": "task_feedback"
+        },
+        {
+          "text": "你这方法错了，你真蠢",
+          "event": "scold",
+          "about_me": true,
+          "cause": "direct_criticism"
+        },
+        {
+          "text": "对不起，刚才把配置改坏了",
+          "event": "apology",
+          "about_me": true,
+          "cause": "relationship_repair"
+        }
+      ]
+    }
+  },
+  "fixture": {
+    "queries": 102,
+    "memories": 449,
+    "feature_dimension": 512,
+    "sha256": "dc12d6e34d6656067f94acfd7df95b05ef52fb8bad4ede17bea98fb9b7cabf7b"
+  },
+  "source_hashes": {
+    "before": {
+      "soulcore/__init__.py": "bc57b8c298a2e4d9f61b1f2967002e4c59bcc705cda225e1366c0a8ae142c34b",
+      "soulcore/__main__.py": "cf7390a2508a0fcad4777a4a629fc5212ab655cb45845975995f835676a834e3",
+      "soulcore/adapters/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "soulcore/adapters/bilibili.py": "d9a8d38239499c1978c992e8ca9c3273e8da787ea19fcf8572df6f884415bdde",
+      "soulcore/adapters/onebot.py": "ecb276cf4884074355fa72979d9d1883859ab1de7429ad1cba238ed15b2cb002",
+      "soulcore/adapters/onebot_ws.py": "3db16be5e2e50a5d1d294188408353bf3809b4082fefaf3710dd79f032ecde6a",
+      "soulcore/appraisal.py": "8eade57f406a0b5d9cdebe90da1b2450ff25fbeb99405865a0ea607a5ad2dedf",
+      "soulcore/bili_chat.py": "f52a71dff9eb98d5515c009f911a2df72288e3b59ad8126f70281fb00a5eb5ae",
+      "soulcore/bili_watch.py": "dab8fa82b6e6f56d7208e79f3d364a7368925a3fdd2c84a4a71667304c2bfd17",
+      "soulcore/cc_hook.py": "b5f0a86ca8662cd7de0a470d292c32d4a49b5d01331d6e0bdf845fd1c6aa0a65",
+      "soulcore/cc_install.py": "6d6cca7fa9ef0eea361b16a4c10534d06c8c9aba9951d384fa467868acc1d339",
+      "soulcore/chat_intents.py": "3bcc9d000daf19618c5b6882916122940278ec8bd849d05bc321b36bb334ac11",
+      "soulcore/cli.py": "611fc05ccbf60f1d82131e856b2c40728542cc8c4166666895b021cfda94f834",
+      "soulcore/client.py": "b2a78c76a1ad8abacae34e2bbbc678ff85a072957a93c4a71b8341444d2f1d87",
+      "soulcore/concepts.py": "c7cea15cd62c32f46cfd8e017cebdbfd747a8144935dcfaae48fa79c5bf3ea66",
+      "soulcore/config.py": "190357356d64905e64b74985aa32207cb2d7ee0409945a52849c708e90198f04",
+      "soulcore/conflicts.py": "f0194f6a9799d4109ae32ead3d11d39bf548e5fedb42013e309fbffc1b838bb7",
+      "soulcore/demo.py": "198944eccec38d26903ee76c15a028eb61e39067573e1bda833e2509c452fcaa",
+      "soulcore/embedding.py": "ac0c0751ef2ad064acab3644f46cc8e214f636bfb21a263e159aedab0c8a7107",
+      "soulcore/emotion.py": "2048d884e1e5bd9e7701578a23d4db5a940d1df291bb7317d47b4d77f5ed3e16",
+      "soulcore/engine.py": "f60c85715b7a17eadd8930376b921202aeb41ae6d32b01c507cc874556cdce74",
+      "soulcore/events.py": "5067393f5c4e5f92aa0167d9a86f0e147f54a05eba84d09d508d4f8f5b7ffa94",
+      "soulcore/extractor.py": "f56feb3ca83c58f9b34af98f0877d5ef8ab5c11c3ccddcbfe21edd1c22c3c2f0",
+      "soulcore/initiative.py": "a20e2bdd8d315e170c95e4ef669d51c94ac59973bc0f21c972d63e42a01db705",
+      "soulcore/llm.py": "bd5be72c88c6567d62c29349cca41b7149bf0d3d4069fdb5f8d29b6c792c1122",
+      "soulcore/lockfile.py": "f21d9a7b55e7ea5d1962e5576547a182b413d3c3717dc3c6968f64156b9b13fd",
+      "soulcore/mcp_server.py": "f45a785f83c4c653289fa57f9a086a448f615ae82669008f6e0da752799d9b73",
+      "soulcore/memory.py": "1c96a4df3ad82938788ca1d71ef21746545c3f4bac4eb4f1653664e85bb05344",
+      "soulcore/persona.py": "55f0f2927549b19dfb79ac63eca983446ca36613a800467253f72a70e68639bd",
+      "soulcore/ratelimit.py": "e9a86e5b661f14fbcda462aef287a73b9488a83ee877e4c525931b7452be8eef",
+      "soulcore/server.py": "bb91af51aa1684f09669d4eb50f0b97b62dd7944bfb2d19d4ad4f9344b7b7d77",
+      "soulcore/service.py": "36d45d29bfff614d3f4f9d3ea9b0b8e2683a84f6d1da87537d8be5028ffb46de",
+      "soulcore/showcase.py": "c9b3ba9d63f6044e1c3d4d13c015e66a125c9d9e850dd2444736ab275b672dea",
+      "soulcore/stickers.py": "4e550fdcea892c8ecbea30f1efcda86f5201800c875515fa7da1c92d551a8733",
+      "soulcore/textutil.py": "4b7793533442193594f679174e5f4c45129b3c30c061b2cc9f4e82b6fef3f8d1",
+      "soulcore/timeparse.py": "38e045528ca2a36137a0196c37abc67656882278d36c04bde808b099b7e23842"
+    },
+    "after": {
+      "soulcore/__init__.py": "bc57b8c298a2e4d9f61b1f2967002e4c59bcc705cda225e1366c0a8ae142c34b",
+      "soulcore/__main__.py": "cf7390a2508a0fcad4777a4a629fc5212ab655cb45845975995f835676a834e3",
+      "soulcore/adapters/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "soulcore/adapters/bilibili.py": "d9a8d38239499c1978c992e8ca9c3273e8da787ea19fcf8572df6f884415bdde",
+      "soulcore/adapters/onebot.py": "c420e852f1522e339078934ebf4e96363dc95d7de771fab78d7d9ebf78631fac",
+      "soulcore/adapters/onebot_ws.py": "3db16be5e2e50a5d1d294188408353bf3809b4082fefaf3710dd79f032ecde6a",
+      "soulcore/appraisal.py": "4e486e77ed0ada4e991f6294d03f831ee8dd6aad8eb9cb3d5191b4a5f2ecc3d1",
+      "soulcore/behavior.py": "c429b59b500c2083b0315062621ba0ed02574a4e6e711f2e6b66558a87c89a8b",
+      "soulcore/bili_chat.py": "17975eee35a570c0a7ae3417f8a51693aa651e5e3205492d70a00d18c8f4967a",
+      "soulcore/bili_watch.py": "dab8fa82b6e6f56d7208e79f3d364a7368925a3fdd2c84a4a71667304c2bfd17",
+      "soulcore/budget.py": "6e7119cde1c6da8e3fdd78ce5f5eea6c5a3590fa56d1670fab58007f857da35f",
+      "soulcore/cc_hook.py": "ab12d4946f8aa722481734ddb646871e635c02a9dc3abe7f6f32591cf9702f9d",
+      "soulcore/cc_install.py": "6d6cca7fa9ef0eea361b16a4c10534d06c8c9aba9951d384fa467868acc1d339",
+      "soulcore/chat_intents.py": "3bcc9d000daf19618c5b6882916122940278ec8bd849d05bc321b36bb334ac11",
+      "soulcore/cli.py": "611fc05ccbf60f1d82131e856b2c40728542cc8c4166666895b021cfda94f834",
+      "soulcore/client.py": "b2a78c76a1ad8abacae34e2bbbc678ff85a072957a93c4a71b8341444d2f1d87",
+      "soulcore/concepts.py": "c7cea15cd62c32f46cfd8e017cebdbfd747a8144935dcfaae48fa79c5bf3ea66",
+      "soulcore/config.py": "c3859ab22b2f673f189a909e487280f6b2abc15a46b14bb6a9047ba63392229b",
+      "soulcore/conflicts.py": "7fcaeff9cae924a0d31c62c777b7f160eaac5d3103f3ea57976c373936e555e8",
+      "soulcore/demo.py": "198944eccec38d26903ee76c15a028eb61e39067573e1bda833e2509c452fcaa",
+      "soulcore/embedding.py": "9e9995cd11db345fbbfd16dec88762a861397afabeb671c9e72f4dcdb09c1dc3",
+      "soulcore/emotion.py": "822ec60af4568e4323b2ba63dc1a691a5db81f3d8e75b8e981d5c08a444b2d6a",
+      "soulcore/engine.py": "2dedb333985a539f4ae4284e6f5013d8c0e84b02fff4e09536c25650e0ca70c5",
+      "soulcore/events.py": "a7a6b88d2057c77b9388de4cc4a8f79c937d5f8405d5784659bad37231211f3e",
+      "soulcore/extractor.py": "808d40110c30861927f54836fba32b172e34faad47ef741bc9c6d5379923297d",
+      "soulcore/initiative.py": "c0642be7ce039976adc83a490083874d27fea467c14b6f5f34ad7b868e310364",
+      "soulcore/llm.py": "242c447d3c02ec88e6bf15360cbe4c2266522709caf73c7f9ee63142f74117b9",
+      "soulcore/lockfile.py": "f21d9a7b55e7ea5d1962e5576547a182b413d3c3717dc3c6968f64156b9b13fd",
+      "soulcore/mcp_server.py": "096b5c88d4deb809f21bd3293e9792c357529bcf7b26792a5d2700bf9276237b",
+      "soulcore/memory.py": "2d5b56d4dcb6b3a28294d17091a809ed55e55d16351d477144b44ce4091cc1fe",
+      "soulcore/persona.py": "663792d2c25d7af2b3d02231fc52fb242ef586823a22443b48396ea82ad5db42",
+      "soulcore/projects.py": "d4efa49a1549803f5de1c1a75439ccf511999d5ba47d12afe111fd803951b83b",
+      "soulcore/ratelimit.py": "e9a86e5b661f14fbcda462aef287a73b9488a83ee877e4c525931b7452be8eef",
+      "soulcore/server.py": "9ccd7d71b883b677783d99ba94bd7fc1f8597bee43076bbc941bd68abc428dc5",
+      "soulcore/service.py": "36d45d29bfff614d3f4f9d3ea9b0b8e2683a84f6d1da87537d8be5028ffb46de",
+      "soulcore/showcase.py": "c9b3ba9d63f6044e1c3d4d13c015e66a125c9d9e850dd2444736ab275b672dea",
+      "soulcore/stickers.py": "4e550fdcea892c8ecbea30f1efcda86f5201800c875515fa7da1c92d551a8733",
+      "soulcore/textutil.py": "2aba3485c9e1f2754a9a75647d450de13f12de1e9f84848778007aa66ef09b0b",
+      "soulcore/timeparse.py": "38e045528ca2a36137a0196c37abc67656882278d36c04bde808b099b7e23842",
+      "soulcore/usage.py": "0bc6e3487d6d5e4b1169430278a86c5447f4ebc8091377766daeda7e1a1571e2"
+    }
+  },
+  "source_unchanged": true,
+  "limitations": [
+    "MockLLM and deterministic lexical-hash512; no live model or embedding API",
+    "Longmem measures context keyword visibility and valid fact presence, not answer accuracy",
+    "Project filter in SurfCore adapter is external; this is not a native capability claim",
+    "Latencies refer to different execution paths; no overall runtime ranking",
+    "Old restarted RNG is unseeded by its serializer; restart errors are this run observations",
+    "Estimated tokens and characters are proxies; no actual cost reduction established"
+  ],
+  "surfcore_latency": {
+    "latency_ms": {
+      "median": 0.1973000000000127,
+      "p95": 0.2867999999999995
+    },
+    "disk_search_latency_ms": {
+      "median": 2.266399999999976,
+      "p95": 3.243600000000015
+    }
+  },
+  "external_source_hashes": {
+    "SurfCore/src/vector-memory.js": "497d41508c3f4106ebc57432d0ba7476584864ce9a9effcdc039278aecac7638"
+  }
+}

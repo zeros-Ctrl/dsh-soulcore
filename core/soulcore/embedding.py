@@ -10,11 +10,14 @@
 
 配置写在 config.json 的 memory.embedding 里：
   {"provider": "http", "base_url": "...", "api_key": "...", "model": "BAAI/bge-m3"}
+切换同名模型的服务或版本时，可显式设置新的 space_id；旧向量先由字词检索兜底，
+再由维护器分批重建。未设置时保留旧命名，不因升级自动触发付费重建。
 """
 from __future__ import annotations
-import json, logging, math, os, urllib.request
+import hashlib, json, logging, math, os, time, urllib.request
 from array import array
 from collections import OrderedDict
+from .usage import record_request
 
 log = logging.getLogger("soulcore.embed")
 
@@ -26,13 +29,24 @@ except Exception:          # pragma: no cover
 
 class HTTPEmbedder:
     def __init__(self, cfg: dict):
+        self.provider = cfg.get("provider", "http")
+        self.usage_ledger = None
         self.base = cfg.get("base_url", "").rstrip("/")
         self.key = cfg.get("api_key") or os.environ.get(cfg.get("api_key_env", "SOULCORE_EMBED_KEY"), "")
         self.model = cfg.get("model", "BAAI/bge-m3")
         self.timeout = cfg.get("timeout", 20)
         self.name = f"http:{self.model}"
+        # Explicit opt-in namespace for endpoint/model revisions. Keep the old
+        # default to avoid an automatic paid re-embedding migration on upgrade.
+        if isinstance(cfg.get("space_id"), str) and cfg["space_id"].strip():
+            digest = hashlib.sha256(cfg["space_id"].strip().encode()).hexdigest()[:16]
+            self.name += f":space:{digest}"
         if not self.base:
             raise ValueError("embedding.base_url 未配置")
+
+    def bind_usage(self, ledger):
+        self.usage_ledger = ledger
+        return self
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         body = json.dumps({"model": self.model, "input": texts}).encode()
@@ -40,10 +54,23 @@ class HTTPEmbedder:
         if self.key:
             headers["Authorization"] = f"Bearer {self.key}"
         req = urllib.request.Request(self.base + "/embeddings", data=body, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=self.timeout) as r:
-            data = json.loads(r.read().decode())
-        rows = sorted(data["data"], key=lambda x: x.get("index", 0))
-        return [row["embedding"] for row in rows]
+        started, data, success, failure = time.perf_counter(), None, False, None
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                data = json.loads(r.read().decode())
+            rows = sorted(data["data"], key=lambda x: x.get("index", 0))
+            vectors = [row["embedding"] for row in rows]
+            success = True
+            return vectors
+        except Exception as ex:
+            failure = ex
+            raise
+        finally:
+            record_request(self.usage_ledger, provider=self.provider, model=self.model, operation="embedding",
+                           usage=data.get("usage") if isinstance(data, dict) else None,
+                           success=success, elapsed_ms=(time.perf_counter()-started)*1000,
+                           status_code=getattr(failure, "code", None),
+                           error_type=type(failure).__name__ if failure else "")
 
 
 class FastEmbedder:
@@ -64,6 +91,11 @@ class CachedEmbedder:
         self.name = inner.name
         self.cache: OrderedDict[str, list[float]] = OrderedDict()
         self.fails, self.open_until = 0, 0.0
+
+    def bind_usage(self, ledger):
+        if hasattr(self.inner, "bind_usage"):
+            self.inner.bind_usage(ledger)
+        return self
 
     @property
     def available(self) -> bool:

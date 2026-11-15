@@ -1,0 +1,13 @@
+﻿version,role,input_chars,stored_chars,exact_original,retention_ratio,middle_constraint_in_excerpt,excerpt_chars
+before,user,962,0,False,0.0,True,800
+before,assistant,962,0,False,0.0,False,300
+before,user,4636,0,False,0.0,False,800
+before,assistant,4636,0,False,0.0,False,300
+before,user,11060,0,False,0.0,False,800
+before,assistant,11060,0,False,0.0,False,300
+after,user,962,962,True,1.0,True,644
+after,assistant,962,962,True,1.0,True,299
+after,user,4636,4636,True,1.0,True,644
+after,assistant,4636,4636,True,1.0,True,299
+after,user,11060,11060,True,1.0,True,644
+after,assistant,11060,11060,True,1.0,True,299

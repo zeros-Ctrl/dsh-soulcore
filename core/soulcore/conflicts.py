@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from .textutil import jaccard
+from .textutil import jaccard, strip_source_prefix
 
 SPEAKER_PREFIX = re.compile(r"^[^：:\s]{1,12}说[：:]")          # 规则提炼产出的 "主人说：..."
 FILLER_PREFIX = re.compile(r"^(记住|记一下|记得|别忘了|跟你说|告诉你)[，,：:\s]*")
@@ -53,7 +53,7 @@ _ASCII_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9\-\.]*")
 
 def core_text(s: str) -> str:
     """去掉说话人前缀和"记住，"这类前缀，再去掉首尾空白"""
-    s = (s or "").strip()
+    s = strip_source_prefix(s)
     s = SPEAKER_PREFIX.sub("", s)
     s = FILLER_PREFIX.sub("", s)
     return s.strip()
