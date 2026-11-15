@@ -32,8 +32,11 @@ MCP server 第一次调用工具时会自己把后端拉起来（`--idle-exit-mi
 | `memory_timeline` | `limit=10` | 最近记了什么、哪些说法过时了 |
 | `mood_status` | 无 | 心情、标签、孤独度 |
 
-`project` 默认取 MCP 进程启动时的 `cwd`：有 `.git` 时用仓库根目录名，否则用最后一级目录名。
-规则和 DSH、Claude Code hook 完全一致，所以同一个项目在三个地方共用 `project/<名>`。
+`project` 默认以MCP进程cwd解析项目。名字是别名；默认registry模式按规范cwd注册持久UUID，和DSH/Claude Code共享home后，同一规范目录共用同一身份，两个同名目录不会仅凭basename混用。
+
+桌面客户端启动MCP的cwd不一定是项目目录。`memory_search` 可传已注册项目名或UUID，同名有歧义时使用UUID；`remember` 写当前MCP项目，**没有project参数**，需要在目标目录启动MCP或用HTTP携带明确event/project_id写入。跨目录搬家、重命名和跨机器不能自动保证原身份。
+
+记忆返回可带“提议/已接受/已实施/有验证证据”状态；没有证据不等于测试通过。MCP不自动每轮记录和注入，自动流程见 [Claude Code hooks](claude-code.md)。接续卡与 `memory_expand` 暂缓。
 
 ## 3. 各客户端配置
 
@@ -45,7 +48,7 @@ MCP server 第一次调用工具时会自己把后端拉起来（`--idle-exit-mi
 claude mcp add soulcore -- python -I <仓库>/core/run.py mcp
 ```
 
-这条命令把服务器写进 Claude Code 的用户级配置（`claude mcp add --scope user ...` 是同一个意思）。
+需要用户级配置时显式使用 `claude mcp add --scope user soulcore -- python -I <仓库>/core/run.py mcp`，具体默认scope以客户端版本为准。
 
 ### 项目级 `.mcp.json`（Claude Code / 其它认这个文件名的客户端）
 
@@ -112,6 +115,6 @@ Windows：`%APPDATA%\Claude\`）：
 
 ## 5. 隐私
 
-MCP 工具只读写本机 `<home>/data/memory.db` 和 Markdown 镜像；只有"提炼/摘要/画像"这几步会把
-压缩后的对话片段发给 DeepSeek（要填了 key 才会发）。没填 key 时完全离线（规则提炼）。
-`forget` 之后检索不到；想彻底删掉所有数据，直接删 `<home>` 目录。
+MCP工具通过本机后端读写data_dir的记忆；提炼/摘要/画像启用模型后会把相应材料发给 `llm.*` 配置的服务。HTTP向量另会把相应文本发给向量服务；没有模型Key且关闭HTTP向量时可本地规则运行。若共享后端还开启QQ等能力，仍以整份后端配置为准。
+
+`forget` 标记删除并加墓碑，检索不再返回，不是物理擦除。备份/彻底移除数据前先停止后端，按实际data_dir处理。[配置位置与数据说明](config.md) · [操作验收](quickstart.md)

@@ -41,7 +41,11 @@ SOULCORE_READY {"port": 8765, "pid": 4242, "name": "小汐", "version": "0.10.0"
 | `text` | 否 | 消息正文；`hooks/before`、`hooks/context` 用它做检索 |
 | `mentions_self` | 否 | 是否在跟她说（群里没 @ 她就只是"看见了"） |
 | `ts` | 否 | 消息时间戳（秒），不填用服务器当前时间 |
-| `raw` | 否 | 原样透传的平台字段，不参与记忆 |
+| `cwd` | 否 | local/project的工作目录，用于注册和解析项目UUID |
+| `project_id` | 否 | 显式项目UUID，用于同名隔离和身份延续 |
+| `session_id` / `thread_id` | 否 | 会话/线程来源与分批边界 |
+| `event_id` | 否 | 平台消息ID，用于来源关联和重复投递识别 |
+| `raw` | 否 | 平台结构化字段；受支持的来源/工具证据字段会参与记录，勿放密钥 |
 
 `(platform, scene, channel_id)` 决定记忆路径和默认可信度：
 
@@ -72,6 +76,29 @@ SOULCORE_READY {"port": 8765, "pid": 4242, "name": "小汐", "version": "0.10.0"
 {"mood": 0.63, "label": "心情不错", "loneliness": 0.12, "baseline": 0.62,
  "describe": "你现在心情不错...", "memory": {"project": {"hot": 42}}}
 ```
+
+新版还返回arousal、表达/用量及提炼覆盖相关状态，具体键以响应为准；此处为局部示例。
+
+### POST /v1/projects/resolve
+
+解析或注册项目身份，body传event。相同home与规范cwd得到持久UUID；名字不再是唯一身份，旧路径保留兼容，同名碰撞不会自动认领旧历史。示例body：
+
+```json
+{
+  "event": {
+    "platform": "local", "scene": "project", "channel_id": "demo",
+    "user_id": "owner", "cwd": "C:/Projects/demo", "session_id": "session-a"
+  }
+}
+```
+
+使用响应中的 `project_id` 和 `channel_id` 传入后续event。搬家/重命名需携带原身份并确认绑定；不只凭basename关联。`GET /v1/memory/search` 与timeline支持查询参数 `project_id`，应与path一起使用，避免同名混用。
+
+### GET /v1/usage
+
+查询实际用量汇总，返回 `enabled`、`totals`、`by_purpose`、`by_model`、`known_cost_by_currency`、`cost_complete` 与记录错误数。缺usage/价格/缓存拆分显示未覆盖，不把字符数当账单。
+
+接口同样需要Bearer token。先读by_model的真实标识，再按 [usage.prices格式](config.md#usage实际用量与费用估算)填价；历史记录不追溯重算。宿主用量上报的 `POST /v1/usage` 供DSH适配器使用，purpose只接受host_online/host_compaction。
 
 ### POST /v1/hooks/before
 

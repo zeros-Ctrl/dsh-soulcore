@@ -32,7 +32,7 @@
 
 SurfCore RAM排序更快，读盘后也更轻；SoulCore测的是SQLite检索完整路径。两者处理范围不同，不能作为整个插件速度排名。SurfCore的项目过滤由外部适配器提供，不是其原生项目UUID能力。它的向量入口会裁切/脱敏素材，不是完整会话档案；不能将此不同职责直接评为“丢原始对话”。本轮没有运行 Mem0、Letta等服务，也没有借用论文成绩冒充实测。
 
-![检索与归属](figures/retrieval-and-projects.svg)
+![检索与归属](figures/retrieval-and-projects.png)
 
 ## 全部五组200天模拟
 
@@ -64,7 +64,7 @@ seed211中，新旧版都漏掉“昨天我们决定了什么”对应的“巡�
 
 **成本目标仍未完成。** 更多来源编号、证据/状态说明和表达提示增加输入。实际账本已实现，但本轮使用MockLLM，没有供应商计费usage、缓存命中实价或真人对话，因此不能声称人民币、真实token或思考链长度下降。下一步宜做提炼提示/来源表示的独立消融，并以此套可靠性检查为回归门槛；不靠把默认召回预算压到100来省钱。
 
-![长期输入开销](figures/longmem-cost.svg)
+![长期输入开销](figures/longmem-cost.png)
 
 ## 情绪与预算曲线
 
@@ -72,11 +72,11 @@ seed211中，新旧版都漏掉“昨天我们决定了什么”对应的“巡�
 
 本地表达策略：低mood且低唤醒时，明确轻闲聊预算从400降到260；高mood且高唤醒时，允许最多3条消息；任务/直接问题保持完整预算。曲线展示配置上限，没有测真人感、真实生成消息数或实际token。概率安静仍默认关闭。
 
-![情绪与表达](figures/affect-and-expression.svg)
+![情绪与表达](figures/affect-and-expression.png)
 
 预算100时完整答案记录可见率43.14%，关键decision/todo/固定记录保持100%；均值仍约180.27估算token，因为软预算允许关键条目溢出。相对关闭预算，仅降低约12.4%估算注入token，却损失56.9个百分点的完整答案记录可见率。已测300/600/1000/1600及关闭预算时，完整答案记录均100%，约205.8估算token。**默认仍800**；长期模拟也使用此默认值。装配减少不删原始数据，但极低预算仍影响本轮可见信息。
 
-![预算权衡](figures/budget-tradeoff.svg)
+![预算权衡](figures/budget-tradeoff.png)
 
 ## 修复、回归与复现
 
@@ -89,3 +89,24 @@ seed211中，新旧版都漏掉“昨天我们决定了什么”对应的“巡�
 复现脚本在 `core/bench/run_improvements.py`：传入旧版和新版core目录、输出目录、可选SurfCore目录。接着用 `report_improvements.py` 导出CSV/摘要，`plot_improvements.py`生成图。五seed均保留，清单记录退出码与源码hash，最后检查源码未变化。
 
 完整运行时原始JSON由复现脚本输出；本目录保留可审阅摘要与CSV；配对数据见 [longmem.csv](tables/longmem.csv)，分类检索见 [retrieval.csv](tables/retrieval.csv)，预算见 [budgets.csv](tables/budgets.csv)，记忆探测完整上下文见 [probe-contexts.csv](tables/probe-contexts.csv)。数据审计与图表契约一并保留。原建议第三项接续卡/按需展开工具继续暂缓。
+
+
+## 复现命令
+
+在仓库目录运行，先导出两个固定提交，避免未提交的本地改动影响比较。下面相邻的输出目录应使用新的空目录；不要覆盖已有数据。
+
+```powershell
+git archive --format=zip --output ../soulcore-bench-before.zip d9e5da7
+git archive --format=zip --output ../soulcore-bench-after.zip c40cbd0
+Expand-Archive -LiteralPath ../soulcore-bench-before.zip -DestinationPath ../soulcore-bench-before
+Expand-Archive -LiteralPath ../soulcore-bench-after.zip -DestinationPath ../soulcore-bench-after
+python -X utf8 -B core/bench/run_improvements.py --before ../soulcore-bench-before/core --after ../soulcore-bench-after/core --out ../soulcore-bench-results --seeds 42 73 101 211 307
+python -X utf8 -B core/bench/report_improvements.py ../soulcore-bench-results ../soulcore-bench-tables
+python -X utf8 -B core/bench/plot_improvements.py ../soulcore-bench-tables ../soulcore-bench-figures
+```
+
+如需SurfCore组件比较，在run_improvements命令追加 `--surf-source C:/Projects/surfcore-main`，替换为包含实际被测模块的仓库路径；没有源码时该外部比较不会运行。运行比较和表格汇总使用标准库；绘图额外需要matplotlib、pandas、numpy，以及Microsoft YaHei/Noto Sans CJK SC/SimHei之一。
+
+复现会保留所有seed、原始JSON、子进程输出、run-manifest.json和源码hash。数据审计、表格和四张PNG/SVG由后续脚本生成。执行耗时和旧版未持久的随机源受环境影响，不保证每个小数完全一样。
+
+[项目入口](../../../README.md) · [使用指南](../../quickstart.md) · [配置](../../config.md) · [开发过程](../../development-notes.md)

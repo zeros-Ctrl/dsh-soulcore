@@ -4,7 +4,7 @@
 
 ## GitHub 来源
 
-仓库公开后，在终端执行：
+在终端执行：
 
 ```bash
 dsh plugin --profile desktop add github:zeros-Ctrl/dsh-soulcore
@@ -45,7 +45,7 @@ dsh plugin --profile desktop add "link:/home/user/plugins/dsh-soulcore"
 python -I core/run.py --mock showcase
 ```
 
-记忆和人设默认写到 `~/.dsh/soulcore/`，不写到插件安装目录。版本更新会沿用这份数据。
+配置和人设默认在 `~/.dsh/soulcore/`，记忆数据默认在其 `data/` 子目录，以config的data_dir为准。版本更新沿用数据；高级JSON编辑后重启后端。完整跨会话验收与配置步骤见 [快速上手](quickstart.md)和[配置指南](config.md)。
 
 ## 排查
 
